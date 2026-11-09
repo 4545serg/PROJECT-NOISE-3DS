@@ -1,4 +1,4 @@
-# PROJECT SLITHER
+# PROJECT NOISE
 
 A native MP3 player for the Nintendo 3DS family, written in C against libctru + citro2d.
 Targets **Old 3DS / 3DS XL / 2DS** (no New 3DS features required; New 3DS simply runs it faster).
