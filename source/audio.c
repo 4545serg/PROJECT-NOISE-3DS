@@ -19,6 +19,8 @@ static volatile bool   g_quit;
 static char            g_req_path[512];
 static u32             g_req_start;
 static volatile int    g_req;            /* 0 none, 1 play, 2 stop */
+static volatile float  g_req_frac = -1.0f;   /* >= 0: start this far into the file (seek) */
+static volatile u32    g_req_ms;
 static volatile bool   g_want_pause;
 static volatile int    g_want_vol = 80;
 static volatile bool   g_active, g_finished, g_error;
@@ -98,6 +100,8 @@ static void handle_request(void)
     LightLock_Lock(&g_lock);
     int req = g_req;
     u32 start = g_req_start;
+    float frac = g_req_frac;
+    u32 ms = g_req_ms;
     snprintf(path, sizeof path, "%s", g_req_path);
     g_req = 0;
     LightLock_Unlock(&g_lock);
@@ -110,13 +114,22 @@ static void handle_request(void)
 
     fp = fopen(path, "rb");
     if (!fp) { g_active = false; g_error = true; return; }
-    fseek(fp, (long)start, SEEK_SET);
+    if (frac >= 0.0f) {
+        long sz = 0;
+        if (fseek(fp, 0, SEEK_END) == 0) sz = ftell(fp);
+        long end = sz - 128;                         /* ignore a trailing ID3v1 tag */
+        long off = (long)start;
+        if (end > off) off += (long)((float)(end - off) * frac);
+        fseek(fp, off, SEEK_SET);
+    } else {
+        fseek(fp, (long)start, SEEK_SET);
+    }
 
     mp3dec_init(dec);
     inlen = inoff = 0;
     in_eof = dec_done = rate_set = false;
     fill_i = rec_i = 0;
-    g_played = 0;
+    g_played = (frac >= 0.0f) ? (u32)((u64)ms * (g_rate ? g_rate : 44100u) / 1000u) : 0;
 
     ndspChnSetInterp(0, NDSP_INTERP_LINEAR);
     ndspChnSetFormat(0, NDSP_FORMAT_STEREO_PCM16);
@@ -225,19 +238,34 @@ void audio_exit(void)
     ready = false;
 }
 
-void audio_play(const char *path, u32 audio_start)
+static void request_play(const char *path, u32 audio_start, float frac, u32 start_ms)
 {
     if (!ready) return;
     LightLock_Lock(&g_lock);
     snprintf(g_req_path, sizeof g_req_path, "%s", path);
     g_req_start = audio_start;
+    g_req_frac = frac;
+    g_req_ms = start_ms;
     g_req = 1;
     LightLock_Unlock(&g_lock);
     g_want_pause = false;
     g_finished = false;
     g_error = false;
-    g_played = 0;
+    g_played = (frac >= 0.0f) ? (u32)((u64)start_ms * (g_rate ? g_rate : 44100u) / 1000u) : 0;
     g_active = true;
+}
+
+void audio_play(const char *path, u32 audio_start)
+{
+    request_play(path, audio_start, -1.0f, 0);
+}
+
+/* Jump to `frac` (0..1) of the audio data; start_ms is the time shown on the clock afterwards.
+ * Position inside the file is estimated from the byte offset, so it is exact for CBR files and
+ * approximate for VBR files without a seek table. */
+void audio_seek(const char *path, u32 audio_start, float frac, u32 start_ms)
+{
+    request_play(path, audio_start, frac, start_ms);
 }
 
 void audio_stop(void)

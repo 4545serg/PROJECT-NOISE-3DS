@@ -8,6 +8,7 @@ bool audio_init(void);                 /* false => DSP firmware missing, etc. */
 void audio_exit(void);
 
 void audio_play(const char *path, u32 audio_start);   /* async: starts a new track */
+void audio_seek(const char *path, u32 audio_start, float frac, u32 start_ms);   /* frac 0..1 */
 void audio_pause(void);
 void audio_resume(void);
 void audio_stop(void);
