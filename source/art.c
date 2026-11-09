@@ -14,6 +14,9 @@ static bool               g_have;
 static Tex3DS_SubTexture  g_sub = { ART_SIZE, ART_SIZE, 0.0f, 1.0f, 1.0f, 0.0f };
 static C2D_Image          g_img;
 
+static const unsigned char *g_default;
+static size_t             g_default_size;
+
 static unsigned char     *g_pending;
 static size_t             g_pending_size;
 static bool               g_pending_flag;
@@ -98,6 +101,12 @@ static bool build_texture(const unsigned char *data, size_t size)
     return true;
 }
 
+void art_set_default(const unsigned char *data, size_t size)
+{
+    g_default = data;
+    g_default_size = size;
+}
+
 void art_queue(unsigned char *data, size_t size)
 {
     free(g_pending);
@@ -113,6 +122,7 @@ void art_commit(void)
 
     release_tex();
     if (g_pending && g_pending_size) g_have = build_texture(g_pending, g_pending_size);
+    if (!g_have && g_default && g_default_size) g_have = build_texture(g_default, g_default_size);
     free(g_pending);
     g_pending = NULL;
     g_pending_size = 0;

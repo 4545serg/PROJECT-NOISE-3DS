@@ -8,6 +8,8 @@
  * art_queue() takes ownership of `data` (malloc'd; NULL clears the artwork).
  * art_commit() must be called once per frame right AFTER C3D_FrameBegin() and
  * BEFORE drawing, so the texture is never replaced while the GPU is using it. */
+/* Cover shown when nothing (or an undecodable image) is queued. Data must outlive the app. */
+void  art_set_default(const unsigned char *data, size_t size);
 void  art_queue(unsigned char *data, size_t size);
 void  art_commit(void);
 bool  art_ready(void);
