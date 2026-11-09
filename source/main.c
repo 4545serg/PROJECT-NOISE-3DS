@@ -391,14 +391,10 @@ static void draw_library(void)
     text("Your Library", 10, 5, 0.72f, white, C2D_AlignLeft, 0);
     text("SD CARD  /  MUSIC", 310, 13, 0.34f, muted, C2D_AlignRight, 0);
 
-    rounded_box(9, 27, 72, 18, 8, accent);
-    text("SONGS", 45, 30, 0.35f, color(S.bg), C2D_AlignCenter, 0);
-    rounded_box(87, 27, 72, 18, 8, selected_color);
-    text("FOLDERS", 123, 30, 0.35f, white, C2D_AlignCenter, 0);
-
+    text("YOUR MUSIC", 10, 29, 0.34f, accent, C2D_AlignLeft, 0);
     const char *folder = L.dir;
     if (!strncmp(folder, "sdmc:/", 6)) folder += 6;
-    text(folder, 310, 31, 0.32f, muted, C2D_AlignRight, 145);
+    text(folder, 310, 29, 0.32f, muted, C2D_AlignRight, 190);
 
     if (L.n == 0) {
         text("Your library is empty", 160, 92, 0.55f, white,
@@ -523,7 +519,6 @@ int main(void)
         hidScanInput();
         u32 down = hidKeysDown();
         u32 held = hidKeysHeld();
-        u32 up = hidKeysUp();
 
         if (held & KEY_TOUCH) hidTouchRead(&touch);
         if (down & KEY_START) break;

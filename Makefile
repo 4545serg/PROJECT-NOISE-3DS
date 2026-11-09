@@ -1,40 +1,35 @@
-# PROJECT SLITHER - Nintendo 3DS MP3 player
-#
-#   make        -> project_slither.3dsx (+ .smdh)   (for the Homebrew Launcher)
-#   make cia    -> project_slither.cia              (install with FBI)
-#   make deps   -> download minimp3.h and stb_image.h into source/
-#   make clean
-#
-# Requires devkitPro with the 3ds-dev group (libctru, citro2d, citro3d).
-# `make cia` additionally needs `makerom` and `bannertool` on your PATH.
+# PROJECT NOISE - Nintendo 3DS MP3 player
+# make      -> project_noise.3dsx
+# make cia  -> project_noise.cia
+# make deps -> fetch MP3/image decoder headers
 
 ifeq ($(strip $(DEVKITPRO)),)
-$(error "DEVKITPRO is not set. Install devkitPro and run: export DEVKITPRO=/opt/devkitpro")
+$(error "DEVKITPRO is not set. Install devkitPro and set DEVKITPRO")
 endif
 
 DEVKITARM ?= $(DEVKITPRO)/devkitARM
 export PATH := $(DEVKITPRO)/tools/bin:$(DEVKITARM)/bin:$(PATH)
 
-TARGET      := project_slither
-BUILD       := build
-APP_TITLE   := PROJECT SLITHER
-APP_DESC    := Native MP3 player
-APP_AUTHOR  := PROJECT SLITHER
-ICON        := resources/icon.png
-BANNER_IMG  := resources/banner.png
-BANNER_WAV  := resources/banner.wav
-RSF         := resources/app.rsf
+TARGET := project_noise
+BUILD := build
+APP_TITLE := PROJECT NOISE
+APP_DESC := Native MP3 music player
+APP_AUTHOR := PROJECT NOISE
 
-CTRULIB  := $(DEVKITPRO)/libctru
+ICON := resources/icon.png
+BANNER_IMG := resources/banner.png
+BANNER_WAV := resources/banner.wav
+RSF := resources/app.rsf
+
+CTRULIB := $(DEVKITPRO)/libctru
 PORTLIBS := $(DEVKITPRO)/portlibs/3ds
+CC := $(DEVKITARM)/bin/arm-none-eabi-gcc
 
-CC   := $(DEVKITARM)/bin/arm-none-eabi-gcc
 ARCH := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
-
-CFLAGS  := -g -Wall -O2 -std=gnu11 -mword-relocations -ffunction-sections -fdata-sections \
-           $(ARCH) -D__3DS__ -Isource -I$(CTRULIB)/include -I$(PORTLIBS)/include
+CFLAGS := -g -Wall -O2 -std=gnu11 -mword-relocations -ffunction-sections -fdata-sections \
+          $(ARCH) -D__3DS__ -Isource -I$(CTRULIB)/include -I$(PORTLIBS)/include
 LDFLAGS := -specs=3dsx.specs -g $(ARCH) -L$(CTRULIB)/lib -L$(PORTLIBS)/lib
-LIBS    := -lcitro2d -lcitro3d -lctru -lm
+LIBS := -lcitro2d -lcitro3d -lctru -lm
 
 SRCS := $(wildcard source/*.c)
 OBJS := $(patsubst source/%.c,$(BUILD)/%.o,$(SRCS))
