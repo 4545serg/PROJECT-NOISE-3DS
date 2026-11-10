@@ -34,7 +34,7 @@ LIBS := -lcitro2d -lcitro3d -lctru -lm
 SRCS := $(wildcard source/*.c)
 OBJS := $(patsubst source/%.c,$(BUILD)/%.o,$(SRCS))
 HDRS := $(wildcard source/*.h)
-DEPS := source/minimp3.h source/stb_image.h
+DEPS := source/minimp3.h source/stb_image.h source/dr_flac.h
 
 .PHONY: all cia deps clean
 all: $(TARGET).3dsx

@@ -15,7 +15,7 @@ typedef struct {
     int    n, cap;
 } DirList;
 
-/* Lists sub-folders and .mp3 files of `path` (folders first, then A-Z).
+/* Lists sub-folders and .mp3 / .wav / .flac files of `path` (folders first, then A-Z).
  * Adds a ".." entry unless `path` is the music root. */
 bool dir_load(DirList *d, const char *path);
 void dir_free(DirList *d);

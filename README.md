@@ -1,6 +1,6 @@
 # PROJECT NOISE
 
-A native MP3 player for the Nintendo 3DS family, written in C against libctru + citro2d.
+A native MP3 / FLAC / WAV player for the Nintendo 3DS family, written in C against libctru + citro2d.
 Targets **Old 3DS / 3DS XL / 2DS** (no New 3DS features required; New 3DS simply runs it faster).
 
 > **Build status:** the source was written and checked on a machine without the 3DS
@@ -11,10 +11,12 @@ Targets **Old 3DS / 3DS XL / 2DS** (no New 3DS features required; New 3DS simply
 
 ## 1. What it does
 
-**Top screen:** `NOW PLAYING` heading, centred album art (animated snake placeholder
-when a file has none), title, artist, progress bar, current time / total time.
+**Top screen:** a Cover Flow of the album art around the highlighted song in the library
+(covers load a moment after you stop scrolling). Picking a song folds the side covers away
+and leaves the now-playing view (art, title, artist, progress bar, times); scroll the list
+again and the covers fan back out. Songs without art show the animated logo cover.
 
-**Bottom screen:** folder + MP3 browser (starts in `SD:/Music/`), the playing song is
+**Bottom screen:** folder + music browser (starts in `SD:/Music/`), the playing song is
 highlighted, touch controls: previous / play-pause / next / shuffle / repeat / menu.
 
 | Control | Action |
@@ -26,27 +28,34 @@ highlighted, touch controls: previous / play-pause / next / shuffle / repeat / m
 | **D-pad Left/Right** | Page up/down in the list; in settings: adjust the value |
 | **SELECT** | Open / close settings |
 | **START** | Exit |
-| **X / Y** | Shuffle on-off / cycle repeat (off -> all -> one) - extras |
+| **X / Y** | Cycle repeat (off -> all -> one) / shuffle on-off - extras |
 | **Touch** | Tap a row to open/play, drag to scroll, tap the on-screen buttons |
 
 Music keeps playing while you browse folders or change settings. When a track ends the
 next one starts (respecting shuffle/repeat). Previous restarts the track if more than
 3 s have played.
 
-**Settings (SELECT):** Background, Text, Accent and Highlight colours (per-channel R/G/B,
-A switches channel, Left/Right or the touch +/- change it), five theme presets, volume.
+**Settings (SELECT or the menu button):** an iOS/Material-style page with three tabs.
+- **Theme** - five presets plus Background, Text, Accent and Highlight colours (per-channel R/G/B;
+  A or a tap switches channel, D-pad Left/Right or the round -/+ buttons change it).
+- **Sound** - volume slider and a **5-band equalizer** (60 Hz, 230 Hz, 910 Hz, 3.6 kHz, 14 kHz,
+  -12..+12 dB) with presets (Flat, Bass Boost, Treble, Vocal, Rock, Pop). Drag the sliders or use D-pad Left/Right.
+- **More** - close settings or exit the app.
+
 Everything saves automatically to `SD:/3ds/PROJECT_SLITHER/settings.cfg`, along with
-shuffle, repeat and the last folder, and is restored on next launch.
+shuffle, repeat, EQ and the last folder, and is restored on next launch.
 
 ## 2. Putting music on the SD card
 
 1. Power off the console and put its SD card in your PC (FAT32, as formatted by the 3DS).
 2. Create (or let the app create on first launch) the folder `Music` at the top level:
    `SD:/Music/`.
-3. Copy `.mp3` files there. Sub-folders are fine, e.g. `SD:/Music/Artist/Album/01 Song.mp3`.
-4. Put the card back and launch the app. It lists only folders and `.mp3` files.
+3. Copy `.mp3`, `.flac` or `.wav` files there. Sub-folders are fine, e.g. `SD:/Music/Artist/Album/01 Song.mp3`.
+4. Put the card back and launch the app. It lists only folders and `.mp3` / `.flac` / `.wav` files.
 
 Tips
+- Formats: MP3, FLAC (up to 8 channels, mixed down to stereo) and uncompressed WAV (8/16/24/32-bit PCM or 32-bit float).
+  FLAC reads Vorbis comments + embedded pictures; WAV reads LIST/INFO tags. Hi-res FLAC (96 kHz+) may stutter on Old 3DS.
 - Titles/artists come from ID3 tags (ID3v2.2/2.3/2.4, falling back to ID3v1, then the
   file name). Fix wrong tags with a tag editor such as Mp3tag or Kid3.
 - Album art is read from the embedded ID3v2 picture (JPEG or PNG). To keep memory use low
@@ -73,11 +82,11 @@ Tips
    `dkp-pacman -S 3ds-dev`
 2. In a devkitPro shell (MSYS2 on Windows) in this folder:
    ```
-   sh tools/get_deps.sh     # downloads minimp3.h and stb_image.h (or: make deps)
+   sh tools/get_deps.sh     # downloads minimp3.h, stb_image.h and dr_flac.h (or: make deps)
    make                     # -> project_slither.3dsx
    ```
-   If you cannot run the script, download `minimp3.h` (lieff/minimp3) and `stb_image.h`
-   (nothings/stb) into `source/` by hand.
+   If you cannot run the script, download `minimp3.h` (lieff/minimp3), `stb_image.h`
+   (nothings/stb) and `dr_flac.h` (mackron/dr_libs) into `source/` by hand.
 
 ### C. The CIA locally
 `make cia` needs **makerom** and **bannertool** on your PATH (prebuilt Windows/Linux
@@ -102,7 +111,7 @@ with another title you have installed.
 | Symptom | Fix |
 |---|---|
 | No sound, red status line says DSP firmware missing | Dump `dspfirm.cdc` with DSP1 |
-| Empty list | Files must be `.mp3` inside `SD:/Music/` |
+| Empty list | Files must be `.mp3`, `.flac` or `.wav` inside `SD:/Music/` |
 | Stutter on very high bitrate files | Decoding runs on the main CPU core at 268 MHz; 320 kbps CBR/VBR is the practical upper end - re-encode at 192-256 kbps if needed |
 | Placeholder instead of cover | Cover is not JPEG/PNG, is too large, or is not embedded as an ID3v2 picture |
 | Settings not remembered | SD card is write-protected or full |
@@ -111,7 +120,7 @@ with another title you have installed.
 
 ```
 source/main.c      UI, input, playlist logic, settings page
-source/audio.c     minimp3 decode thread -> ndsp channel 0, position tracking
+source/audio.c     minimp3 / dr_flac / WAV decode thread -> ndsp channel 0, position tracking
 source/meta.c      ID3v2/v1 parsing, artwork extraction, duration probe
 source/art.c       JPEG/PNG -> 128x128 tiled GPU texture
 source/browser.c   folder listing / sorting

@@ -20,6 +20,26 @@ const char *PRESET_NAMES[PRESET_COUNT] = {
     "Noise", "Midnight", "Ocean", "Sunset", "Mono"
 };
 
+static const int eq_presets[EQ_PRESET_COUNT][EQ_BANDS] = {
+    {  0,  0,  0,  0,  0 },   /* Flat        */
+    {  6,  4,  0,  0,  0 },   /* Bass Boost  */
+    {  0,  0,  0,  4,  6 },   /* Treble      */
+    { -2,  0,  3,  3,  0 },   /* Vocal       */
+    {  4,  2, -2,  2,  4 },   /* Rock        */
+    { -1,  2,  4,  2, -1 }    /* Pop         */
+};
+
+const char *EQ_PRESET_NAMES[EQ_PRESET_COUNT] = {
+    "Flat", "Bass Boost", "Treble", "Vocal", "Rock", "Pop"
+};
+
+void settings_apply_eq_preset(Settings *s, int idx)
+{
+    if (idx < 0 || idx >= EQ_PRESET_COUNT) return;
+    for (int i = 0; i < EQ_BANDS; i++) s->eq[i] = eq_presets[idx][i];
+    s->eq_preset = idx;
+}
+
 static Rgb from_hex(u32 value)
 {
     Rgb c;
@@ -49,6 +69,7 @@ void settings_defaults(Settings *s)
     memset(s, 0, sizeof(*s));
     settings_apply_preset(s, 0);
     s->volume = 80;
+    settings_apply_eq_preset(s, 0);
     s->shuffle = false;
     s->repeat = 1;
     snprintf(s->last_dir, sizeof(s->last_dir), "%s", MUSIC_ROOT);
@@ -83,6 +104,13 @@ void settings_load(Settings *s)
             s->preset = (int)parsed;
         else if (!strcmp(key, "volume") && sscanf(value, "%d", (int *)&parsed) == 1)
             s->volume = (int)parsed;
+        else if (!strcmp(key, "eq_preset") && sscanf(value, "%d", (int *)&parsed) == 1)
+            s->eq_preset = (int)parsed;
+        else if (!strcmp(key, "eq")) {
+            int g[EQ_BANDS];
+            if (sscanf(value, "%d,%d,%d,%d,%d", &g[0], &g[1], &g[2], &g[3], &g[4]) == EQ_BANDS)
+                for (int i = 0; i < EQ_BANDS; i++) s->eq[i] = g[i];
+        }
         else if (!strcmp(key, "shuffle"))
             s->shuffle = atoi(value) != 0;
         else if (!strcmp(key, "repeat") && sscanf(value, "%d", (int *)&parsed) == 1)
@@ -96,6 +124,11 @@ void settings_load(Settings *s)
     if (s->volume < 0) s->volume = 0;
     if (s->volume > 100) s->volume = 100;
     if (s->repeat < 0 || s->repeat > 2) s->repeat = 1;
+    if (s->eq_preset < -1 || s->eq_preset >= EQ_PRESET_COUNT) s->eq_preset = -1;
+    for (int i = 0; i < EQ_BANDS; i++) {
+        if (s->eq[i] < -12) s->eq[i] = -12;
+        if (s->eq[i] > 12) s->eq[i] = 12;
+    }
     if (s->preset < -1 || s->preset >= PRESET_COUNT) s->preset = -1;
 }
 
@@ -112,6 +145,8 @@ bool settings_save(const Settings *s)
     fprintf(f, "select=%06X\n", (unsigned)to_hex(s->select));
     fprintf(f, "preset=%d\n", s->preset);
     fprintf(f, "volume=%d\n", s->volume);
+    fprintf(f, "eq_preset=%d\n", s->eq_preset);
+    fprintf(f, "eq=%d,%d,%d,%d,%d\n", s->eq[0], s->eq[1], s->eq[2], s->eq[3], s->eq[4]);
     fprintf(f, "shuffle=%d\n", s->shuffle ? 1 : 0);
     fprintf(f, "repeat=%d\n", s->repeat);
     fprintf(f, "last_dir=%s\n", s->last_dir);

@@ -12,10 +12,11 @@
 
 bool is_music_root(const char *dir) { return strcmp(dir, MUSIC_ROOT) == 0; }
 
-static bool has_mp3_ext(const char *name)
+static bool has_audio_ext(const char *name)
 {
     size_t n = strlen(name);
-    return n > 4 && strcasecmp(name + n - 4, ".mp3") == 0;
+    if (n > 4 && (strcasecmp(name + n - 4, ".mp3") == 0 || strcasecmp(name + n - 4, ".wav") == 0)) return true;
+    return n > 5 && strcasecmp(name + n - 5, ".flac") == 0;
 }
 
 static bool add_entry(DirList *d, const char *name, bool is_dir)
@@ -70,7 +71,7 @@ bool dir_load(DirList *d, const char *path)
     while ((de = readdir(dp)) != NULL) {
         if (de->d_name[0] == '.') continue;            /* hidden, ".", ".." */
         if (de->d_type == DT_DIR) add_entry(d, de->d_name, true);
-        else if (has_mp3_ext(de->d_name)) add_entry(d, de->d_name, false);
+        else if (has_audio_ext(de->d_name)) add_entry(d, de->d_name, false);
     }
     closedir(dp);
 

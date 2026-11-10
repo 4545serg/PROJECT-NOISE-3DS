@@ -44,7 +44,8 @@ static void release_tex(void)
     }
 }
 
-static bool build_texture(const unsigned char *data, size_t size)
+/* Decode JPEG/PNG into a 128x128 GPU texture `tex` (caller owns / deletes it). */
+bool art_build_tex(C3D_Tex *tex, const unsigned char *data, size_t size)
 {
     int w = 0, h = 0, c = 0;
     if (!stbi_info_from_memory(data, (int)size, &w, &h, &c)) return false;
@@ -53,14 +54,14 @@ static bool build_texture(const unsigned char *data, size_t size)
     unsigned char *px = stbi_load_from_memory(data, (int)size, &w, &h, &c, 4);
     if (!px) return false;
 
-    if (!C3D_TexInit(&g_tex, ART_SIZE, ART_SIZE, GPU_RGBA8)) {
+    if (!C3D_TexInit(tex, ART_SIZE, ART_SIZE, GPU_RGBA8)) {
         stbi_image_free(px);
         return false;
     }
-    unsigned char *dst = (unsigned char *)g_tex.data;
+    unsigned char *dst = (unsigned char *)tex->data;
 
     for (int dj = 0; dj < ART_SIZE; dj++) {
-        int sj = ART_SIZE - 1 - dj;                       /* GPU textures are stored bottom-up */
+        int sj = dj;                                      /* top row first: fixes upside-down cover */
         int sy0 = sj * h / ART_SIZE, sy1 = (sj + 1) * h / ART_SIZE;
         if (sy1 <= sy0) sy1 = sy0 + 1;
         if (sy1 > h) sy1 = h;
@@ -93,9 +94,15 @@ static bool build_texture(const unsigned char *data, size_t size)
     }
     stbi_image_free(px);
 
-    GSPGPU_FlushDataCache(g_tex.data, ART_SIZE * ART_SIZE * 4);
-    C3D_TexSetFilter(&g_tex, GPU_LINEAR, GPU_NEAREST);
-    C3D_TexSetWrap(&g_tex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
+    GSPGPU_FlushDataCache(tex->data, ART_SIZE * ART_SIZE * 4);
+    C3D_TexSetFilter(tex, GPU_LINEAR, GPU_NEAREST);
+    C3D_TexSetWrap(tex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
+    return true;
+}
+
+static bool build_texture(const unsigned char *data, size_t size)
+{
+    if (!art_build_tex(&g_tex, data, size)) return false;
     g_img.tex = &g_tex;
     g_img.subtex = &g_sub;
     return true;

@@ -15,3 +15,5 @@ void  art_commit(void);
 bool  art_ready(void);
 const C2D_Image *art_image(void);
 void  art_shutdown(void);
+/* Build a standalone 128x128 texture from JPEG/PNG data (used by the cover-flow cache). */
+bool  art_build_tex(C3D_Tex *tex, const unsigned char *data, size_t size);
