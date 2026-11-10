@@ -14,7 +14,7 @@ TARGET := project_noise
 BUILD := build
 APP_TITLE := PROJECT NOISE
 APP_DESC := Native music player
-APP_AUTHOR := PROJECT NOISE
+APP_AUTHOR := GRIMZZZZ
 
 ICON := resources/icon.png
 BANNER_IMG := resources/banner.png

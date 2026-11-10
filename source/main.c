@@ -48,7 +48,7 @@
 #define EQ_TRK_Y1  201         /* ... -12 dB at the bottom           */
 
 enum {                         /* settings rows, grouped in three pages */
-    ROW_PRESET, ROW_GLOW, ROW_FADE,                                          /* Look    */
+    ROW_PRESET, ROW_GLOW, ROW_FADE, ROW_DISPLAY, ROW_WALLPAPER,                /* Look    */
     ROW_EQMAN, ROW_EQPRE, ROW_B0, ROW_B1, ROW_B2, ROW_B3, ROW_B4,        /* Audio   */
     ROW_SEEK, ROW_CLOCK, ROW_BATT, ROW_SLEEP_ENABLE, ROW_SLEEP_TIMER, ROW_GUIDE, ROW_EXIT, /* General */
     SET_ROWS
@@ -57,12 +57,12 @@ enum {                         /* settings rows, grouped in three pages */
 /* "Cards" are lists of settings rows drawn as one inset panel. Cards 0 and 2 are the Look and General
  * tabs (the Sound tab has its own layout); CARD_SETUP is the single combined page of the first-run setup. */
 enum { CARD_LOOK, CARD_SOUND, CARD_GENERAL, CARD_SETUP, CARD_COUNT };
-static const int   ROWS_LOOK[]    = { ROW_PRESET, ROW_GLOW, ROW_FADE };
+static const int   ROWS_LOOK[]    = { ROW_PRESET, ROW_GLOW, ROW_FADE, ROW_DISPLAY, ROW_WALLPAPER };
 static const int   ROWS_GENERAL[] = { ROW_SEEK, ROW_CLOCK, ROW_BATT, ROW_SLEEP_ENABLE, ROW_SLEEP_TIMER, ROW_GUIDE, ROW_EXIT };
 static const int   ROWS_SETUP[]   = { ROW_PRESET, ROW_GLOW, ROW_CLOCK, ROW_BATT };
 static const int  *CARD_ROWS[CARD_COUNT] = { ROWS_LOOK, NULL, ROWS_GENERAL, ROWS_SETUP };
-static const int   CARD_LEN[CARD_COUNT]  = { 3, 0, 7, 4 };
-static const float CARD_ROWH[CARD_COUNT] = { 38.0f, 0.0f, 22.0f, 25.0f };
+static const int   CARD_LEN[CARD_COUNT]  = { 5, 0, 7, 4 };
+static const float CARD_ROWH[CARD_COUNT] = { 28.0f, 0.0f, 22.0f, 25.0f };
 static const int   TAB_FIRST[3]          = { ROW_PRESET, ROW_EQMAN, ROW_SEEK };
 static const char *PAGE_NAMES[3]         = { "Appearance", "Audio", "General" };
 
@@ -654,7 +654,7 @@ static int  row_page(int r)      { return r < ROW_EQMAN ? 0 : (r < ROW_SEEK ? 1 
 
 static bool is_switch_row(int r) { return r == ROW_BATT || r == ROW_SLEEP_ENABLE || r == ROW_EQMAN; }
 static bool is_band_row(int r)   { return r >= ROW_B0 && r <= ROW_B4; }
-static bool is_choice_row(int r) { return r == ROW_PRESET || r == ROW_EQPRE || r == ROW_CLOCK || r == ROW_GLOW || r == ROW_FADE || r == ROW_SEEK || r == ROW_SLEEP_TIMER; }
+static bool is_choice_row(int r) { return r == ROW_PRESET || r == ROW_EQPRE || r == ROW_CLOCK || r == ROW_GLOW || r == ROW_FADE || r == ROW_DISPLAY || r == ROW_WALLPAPER || r == ROW_SEEK || r == ROW_SLEEP_TIMER; }
 
 static int card_pos(int card, int row)            /* index of `row` inside a card, or -1 */
 {
@@ -692,6 +692,11 @@ static void apt_lid_hook(APT_HookType hook, void *param)
 static void favorites_load(void)
 {
     FILE *f = fopen(FAVORITES_PATH, "r"); char line[300];
+    if (!f) {
+        char backup_path[sizeof(FAVORITES_PATH) + 8];
+        snprintf(backup_path, sizeof(backup_path), "%s.bak", FAVORITES_PATH);
+        f = fopen(backup_path, "r");
+    }
     if (!f) return;
     while (fgets(line, sizeof line, f) && favorite_count < FAVORITE_LIMIT) {
         size_t n = strlen(line); while (n && (line[n-1]=='\n' || line[n-1]=='\r')) line[--n]=0;
@@ -703,9 +708,42 @@ static void favorites_load(void)
 static void favorites_save(void)
 {
     mkdir(DATA_ROOT, 0777); mkdir(DATA_DIR, 0777);
-    FILE *f = fopen(FAVORITES_PATH, "w"); if (!f) return;
-    for (int i=0;i<favorite_count;i++) fprintf(f, "%s\n", favorite_paths[i]);
-    fclose(f); favorites_dirty = false;
+
+    /* Keep the last valid favorites file if an interrupted write occurs. */
+    char temp_path[sizeof(FAVORITES_PATH) + 8];
+    snprintf(temp_path, sizeof(temp_path), "%s.tmp", FAVORITES_PATH);
+    FILE *f = fopen(temp_path, "w");
+    if (!f) return;
+
+    for (int i = 0; i < favorite_count; i++)
+        fprintf(f, "%s\n", favorite_paths[i]);
+
+    bool ok = !ferror(f);
+    if (fclose(f) != 0) ok = false;
+    if (!ok) {
+        remove(temp_path);
+        return;
+    }
+    char backup_path[sizeof(FAVORITES_PATH) + 8];
+    snprintf(backup_path, sizeof(backup_path), "%s.bak", FAVORITES_PATH);
+    bool had_old = false;
+    FILE *old = fopen(FAVORITES_PATH, "r");
+    if (old) {
+        fclose(old);
+        remove(backup_path);
+        if (rename(FAVORITES_PATH, backup_path) != 0) {
+            remove(temp_path);
+            return;
+        }
+        had_old = true;
+    }
+    if (rename(temp_path, FAVORITES_PATH) != 0) {
+        if (had_old) rename(backup_path, FAVORITES_PATH);
+        remove(temp_path);
+        return;
+    }
+    if (had_old) remove(backup_path);
+    favorites_dirty = false;
 }
 static int favorite_index(const char *path)
 {
@@ -777,6 +815,10 @@ static void set_adjust(int dir)
         S.glow = (S.glow + dir + GLOW_COUNT) % GLOW_COUNT;
     } else if (set_row == ROW_FADE) {
         S.fade_speed = (S.fade_speed + dir + FADE_COUNT) % FADE_COUNT;
+    } else if (set_row == ROW_DISPLAY) {
+        S.display_mode = (S.display_mode + dir + 4) % 4;
+    } else if (set_row == ROW_WALLPAPER) {
+        S.wallpaper = (S.wallpaper + dir + 5) % 5;
     } else if (set_row == ROW_SLEEP_ENABLE) {
         if (sleep_timer_active) sleep_timer_cancel();
         else sleep_timer_start_or_reset();
@@ -827,7 +869,7 @@ static void close_settings(void)
 {
     settings_open = false;
     set_drag = -1;
-    if (settings_dirty) { settings_save(&S); settings_dirty = false; }
+    if (settings_dirty && settings_save(&S)) settings_dirty = false;
 }
 
 /* ------------------------------------------------------------ key repeat */
@@ -1034,6 +1076,62 @@ static void draw_status_bar(void);
 static void row_text(const char *s, float x, float y, float rh, float sc, u32 col, u32 align, float maxw);
 
 /* ------------------------------------------------ TOP: now playing screen */
+/* Lightweight Old-3DS visualizers: procedural geometry, no extra textures or large buffers. */
+static void draw_visualizer(float x, float y, float size)
+{
+    u32 accent = C(S.accent), soft = C(mix_rgb(S.accent, S.bg, 110));
+    float cx = x + size * 0.5f, cy = y + size * 0.5f;
+    if (S.display_mode == 1) {
+        for (int i = 0; i < 24; i++) {
+            float a = sinf(eq_phase * (1.0f + (i % 5) * 0.13f) + i * 0.57f);
+            float b = cosf(eq_phase * 0.63f + i * 0.31f);
+            float h = 15.0f + (a * 0.5f + 0.5f) * 74.0f + (b * 0.5f + 0.5f) * 20.0f;
+            rrect(x + 5 + i * 5.55f, cy - h * 0.5f, 3.2f, h, 1.6f, 0.40f, (i % 3) ? accent : soft);
+        }
+    } else if (S.display_mode == 2) {
+        for (int i = 0; i < 38; i++) {
+            float a = (float)i / 37.0f;
+            float yy = cy + sinf(a * 12.566f + eq_phase * 1.4f) * (18.0f + 17.0f * sinf(eq_phase * 0.7f + a * 6.28f));
+            C2D_DrawCircleSolid(x + 5 + a * (size - 10), yy, 0.40f, 2.2f, accent);
+        }
+        rrect(x + 5, cy - 1, size - 10, 2, 1, 0.35f, soft);
+    } else {
+        for (int ring = 0; ring < 3; ring++) {
+            float radius = 23.0f + ring * 19.0f;
+            for (int i = 0; i < 12; i++) {
+                float a = (float)i * 0.523599f + eq_phase * (ring % 2 ? -0.35f : 0.35f);
+                float pulse = 0.75f + 0.25f * sinf(eq_phase * 1.8f + i + ring);
+                C2D_DrawCircleSolid(cx + cosf(a) * radius, cy + sinf(a) * radius,
+                                    0.40f, 2.5f + pulse * 2.0f, ring == 1 ? soft : accent);
+            }
+        }
+        C2D_DrawCircleSolid(cx, cy, 0.40f, 7.0f, accent);
+        C2D_DrawCircleSolid(cx, cy, 0.41f, 3.0f, C(S.bg));
+    }
+}
+
+static void draw_wallpaper_accents(float width, float height)
+{
+    if (S.wallpaper == 1) {
+        u32 line = C(mix_rgb(S.bg, S.text, 10));
+        for (int i = -240; i < (int)width + 240; i += 42)
+            C2D_DrawLine((float)i, 0.0f, line, (float)i + 180.0f, height, line, 1.0f, 0.08f);
+    } else if (S.wallpaper == 2) {
+        for (int i = 0; i < 8; i++) {
+            float yy = 24.0f + i * 29.0f;
+            C2D_DrawCircleSolid(35.0f + (i * 47) % (int)width, yy, 0.08f, 22.0f + (i % 3) * 7.0f,
+                                C(mix_rgb(S.bg, S.accent, 12)));
+        }
+    } else if (S.wallpaper == 3 || S.wallpaper == 4) {
+        Rgb tint = S.wallpaper == 3 ? hex_rgb(0xA78BFA) : hex_rgb(0xFF7A45);
+        for (int i = 0; i < 12; i++) {
+            float yy = 18.0f + i * 19.0f;
+            C2D_DrawRectSolid(0, yy, 0.08f, width, 1.0f,
+                C(mix_rgb(S.bg, tint, 9 + (i % 3) * 3)));
+        }
+    }
+}
+
 static void draw_top(void)
 {
     u32 cText = C(S.text), cAcc = C(S.accent), cSel = C(S.select);
@@ -1043,9 +1141,12 @@ static void draw_top(void)
      * frame / backing plate, so nothing grey shows through while the covers slide past. */
     const float asz = 144, ax = 128, ay = 22;                          /* matches FACE / CY in flow.c */
     top_background();
+    draw_wallpaper_accents(TOP_W, SCR_H);
 
-    bool use_flow = flow_appear > 0.01f && L.n > 0;
-    if (use_flow) {
+    bool use_flow = (S.display_mode == 0) && flow_appear > 0.01f && L.n > 0;
+    if (!use_flow && S.display_mode != 0) {
+        draw_visualizer(ax, ay, asz);
+    } else if (use_flow) {
         FlowItem items[10];
         const int base = (int)floorf(flow_pos) - 4;
         const int ci = (int)floorf(flow_pos + 0.5f);
@@ -1497,6 +1598,16 @@ static void draw_card(int card)
             row_text(FADE_NAMES[S.fade_speed], 236, y, rh, 0.5f, cAcc, C2D_AlignCenter, 92);
             chevron(176, cy, false, cDim);
             chevron(296, cy, true, cDim);
+        } else if (r == ROW_DISPLAY) {
+            static const char *DISPLAY_NAMES[4] = { "Album cover", "Spectrum", "Waveform", "Orbit" };
+            row_text("Now playing display", 18, y, rh, 0.42f, cText, C2D_AlignLeft, 160);
+            row_text(DISPLAY_NAMES[S.display_mode], 236, y, rh, 0.42f, cAcc, C2D_AlignCenter, 100);
+            chevron(176, cy, false, cDim); chevron(296, cy, true, cDim);
+        } else if (r == ROW_WALLPAPER) {
+            static const char *WALL_NAMES[5] = { "Midnight", "Carbon", "Aurora", "Violet", "Ember" };
+            row_text("Wallpaper", 18, y, rh, 0.44f, cText, C2D_AlignLeft, 100);
+            row_text(WALL_NAMES[S.wallpaper], 236, y, rh, 0.44f, cAcc, C2D_AlignCenter, 100);
+            chevron(176, cy, false, cDim); chevron(296, cy, true, cDim);
         } else if (r == ROW_SEEK) {
             row_text("Skip length", 18, y, rh, 0.5f, cText, C2D_AlignLeft, 100);
             snprintf(buf, sizeof buf, "%d sec", S.seek_step);
@@ -1704,8 +1815,7 @@ static void wz_finish(void)
     set_drag = -1;
     S.setup_done = true;
     flow_show = true;
-    settings_save(&S);
-    settings_dirty = false;
+    settings_dirty = !settings_save(&S);
 }
 
 static void wz_next(void) { if (wz_page >= WZ_N - 1) wz_finish(); else wz_enter(wz_page + 1); }
@@ -1975,6 +2085,31 @@ static void handle_wizard_touch(touchPosition tp)
     if (WZ_CARD[wz_page] >= 0) card_touch(tp, WZ_CARD[wz_page]);
 }
 
+static void draw_splash(C3D_RenderTarget *top, C3D_RenderTarget *bot)
+{
+    for (int frame = 0; frame < 72 && aptMainLoop(); frame++) {
+        C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+        art_commit();
+        C2D_TextBufClear(tbuf);
+        C2D_TargetClear(top, C2D_Color32(7, 10, 17, 255));
+        C2D_SceneBegin(top);
+        float pulse = 0.72f + 0.28f * sinf((float)frame * 0.09f);
+        u32 accent = C(S.accent);
+        C2D_DrawCircleSolid(200, 105, 0.20f, 70.0f, C2D_Color32(15, 25, 40, 255));
+        C2D_DrawCircleSolid(200, 105, 0.21f, 53.0f, C2D_Color32(12, 18, 29, 255));
+        if (art_ready()) C2D_DrawImageAt(*art_image(), 136, 36, 0.32f, NULL, 1.0f, 1.0f);
+        draw_text("PROJECT NOISE", 200, 145, 0.78f,
+                  C2D_Color32((u8)(S.accent.r * pulse), (u8)(S.accent.g * pulse), (u8)(S.accent.b * pulse), 255),
+                  C2D_AlignCenter, 0);
+        C2D_DrawRectSolid(142, 179, 0.30f, 116, 2, accent);
+        draw_text("MADE BY GRIMZZZZ", 200, 195, 0.48f, C2D_Color32(220, 226, 238, 255), C2D_AlignCenter, 0);
+        C2D_TargetClear(bot, C2D_Color32(7, 10, 17, 255));
+        C2D_SceneBegin(bot);
+        draw_text("YOUR MUSIC. YOUR NOISE.", 160, 105, 0.48f, C2D_Color32(105, 125, 151, 255), C2D_AlignCenter, 0);
+        C3D_FrameEnd(0);
+    }
+}
+
 int main(void)
 {
     osSetSpeedupEnable(true);
@@ -2006,6 +2141,7 @@ int main(void)
     art_queue(NULL, 0);                 /* show the logo cover until a song with art plays */
     flow_init(placeholder_png, placeholder_png_len);
     if (!audio_ok) snprintf(status_msg, sizeof status_msg, "No sound - dspfirm.cdc missing");
+    draw_splash(top, bot);
 
     set_dir(S.last_dir, NULL);
     settings_dirty = false;
@@ -2194,7 +2330,10 @@ int main(void)
         }
 
         /* ---- auto-save theme/settings shortly after the last change ---- */
-        if (settings_dirty && --dirty_timer <= 0) { settings_save(&S); settings_dirty = false; }
+        if (settings_dirty && --dirty_timer <= 0) {
+            if (settings_save(&S)) settings_dirty = false;
+            else dirty_timer = 180; /* retry later; do not discard unsaved changes */
+        }
 
         if (audio_is_active() && !audio_is_paused()) eq_phase += 0.08f;
         if (toast_t > 0) toast_t--;
@@ -2217,6 +2356,7 @@ int main(void)
         C2D_TargetClear(bot, bg);
         C2D_SceneBegin(bot);
         bg_gradient(BOT_W);
+        draw_wallpaper_accents(BOT_W, SCR_H);
         if (search_busy > 0) draw_search_busy();
         else if (confirm_exit) draw_exit_confirm();
         else if (wizard_open) draw_wizard_bottom();

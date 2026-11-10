@@ -17,7 +17,7 @@ in `SD:/3ds/PROJECT_NOISE/covers/` so they appear instantly next time - delete t
 and leaves the now-playing view (art, title, artist, progress bar, times); scroll the list
 again and the covers fan back out. Songs without art show the animated logo cover.
 
-The background around the cover carries an **ambient glow** taken from the artwork's dominant colour: it follows
+A short branded splash screen shows the app mark and **MADE BY GRIMZZZZ** on launch. The background around the cover carries an **ambient glow** taken from the artwork's dominant colour: it follows
 the cover in the middle of the screen (the focused song while you browse, the playing song once you pick one) and
 fades smoothly between covers. Folders and covers without art glow in your accent colour. Turn it off or choose
 *Soft* / *Vivid* in Settings > Appearance > *Ambient glow*.
@@ -58,7 +58,7 @@ It searches names, not ID3 tags - name your files `Artist - Title.mp3` (or keep 
 
 **Settings (SELECT):** three tabs. The queue button at the right end of the mini-player opens the dedicated **Up Next** screen; it keeps transport controls available while you review the queue.
 - **Appearance** - choose a theme preset (Noise, Emerald, Ocean, Sunset, Mono), then keep it simple with **Ambient glow**
-  (Off / Soft / Vivid) and **Cover fade** (Quick / Smooth / Slow). Theme colours are coordinated automatically; there is no separate accent picker.
+  (Off / Soft / Vivid), **Cover fade** (Quick / Smooth / Slow), **Now playing display** (Album cover / Spectrum / Waveform / Orbit), and five built-in wallpaper treatments (Midnight / Carbon / Aurora / Violet / Ember). The visualizers and wallpaper treatments use lightweight 2D drawing rather than large textures, keeping them suitable for Old 3DS. Theme colours are coordinated automatically; there is no separate accent picker.
 - **Audio** - a **Manual EQ** switch and a **5-band equalizer** shown as five **vertical sliders** (60 Hz, 230 Hz,
   910 Hz, 3.6 kHz, 14 kHz, -12..+12 dB, with the gain above each slider) and presets (Flat, Bass Boost, Treble, Vocal, Rock, Pop).
   The 3DS hardware volume slider controls listening volume. Manual EQ **off**: the chosen preset plays and the sliders show its curve (greyed, locked; touching one reminds you to turn Manual EQ on).

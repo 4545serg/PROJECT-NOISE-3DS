@@ -83,6 +83,8 @@ void settings_defaults(Settings *s)
     s->glow = 2;
     s->seek_step = 5;
     s->fade_speed = 1;
+    s->display_mode = 0;
+    s->wallpaper = 0;
     settings_apply_eq_preset(s, 0);
     s->shuffle = false;
     s->sleep_minutes = 15;
@@ -93,6 +95,11 @@ void settings_defaults(Settings *s)
 void settings_load(Settings *s)
 {
     FILE *f = fopen(SETTINGS_PATH, "r");
+    if (!f) {
+        char backup_path[sizeof(SETTINGS_PATH) + 8];
+        snprintf(backup_path, sizeof(backup_path), "%s.bak", SETTINGS_PATH);
+        f = fopen(backup_path, "r");
+    }
     if (!f) return;
 
     char line[600];
@@ -135,6 +142,10 @@ void settings_load(Settings *s)
             s->glow = atoi(value);
         else if (!strcmp(key, "fade_speed"))
             s->fade_speed = atoi(value);
+        else if (!strcmp(key, "display_mode"))
+            s->display_mode = atoi(value);
+        else if (!strcmp(key, "wallpaper"))
+            s->wallpaper = atoi(value);
         else if (!strcmp(key, "seek_step"))
             s->seek_step = atoi(value);
         else if (!strcmp(key, "setup_done"))
@@ -156,6 +167,8 @@ void settings_load(Settings *s)
     if (s->clock_mode < 0 || s->clock_mode > 2) s->clock_mode = 0;
     if (s->glow < 0 || s->glow >= GLOW_COUNT) s->glow = 2;
     if (s->fade_speed < 0 || s->fade_speed >= FADE_COUNT) s->fade_speed = 1;
+    if (s->display_mode < 0 || s->display_mode > 3) s->display_mode = 0;
+    if (s->wallpaper < 0 || s->wallpaper > 4) s->wallpaper = 0;
     {
         bool ok = false;
         for (int i = 0; i < SEEK_STEP_COUNT; i++) if (s->seek_step == SEEK_STEPS[i]) ok = true;
@@ -175,7 +188,11 @@ bool settings_save(const Settings *s)
 {
     mkdir(DATA_ROOT, 0777);
     mkdir(DATA_DIR, 0777);
-    FILE *f = fopen(SETTINGS_PATH, "w");
+    /* Write to a temporary file so an interrupted save cannot truncate the
+     * last valid settings file. */
+    char temp_path[sizeof(SETTINGS_PATH) + 8];
+    snprintf(temp_path, sizeof(temp_path), "%s.tmp", SETTINGS_PATH);
+    FILE *f = fopen(temp_path, "w");
     if (!f) return false;
 
     fprintf(f, "bg=%06X\n", (unsigned)to_hex(s->bg));
@@ -190,12 +207,39 @@ bool settings_save(const Settings *s)
     fprintf(f, "show_batt=%d\n", s->show_batt ? 1 : 0);
     fprintf(f, "glow=%d\n", s->glow);
     fprintf(f, "fade_speed=%d\n", s->fade_speed);
+    fprintf(f, "display_mode=%d\n", s->display_mode);
+    fprintf(f, "wallpaper=%d\n", s->wallpaper);
     fprintf(f, "seek_step=%d\n", s->seek_step);
     fprintf(f, "setup_done=%d\n", s->setup_done ? 1 : 0);
     fprintf(f, "shuffle=%d\n", s->shuffle ? 1 : 0);
     fprintf(f, "sleep_minutes=%d\n", s->sleep_minutes);
     fprintf(f, "repeat=%d\n", s->repeat);
     fprintf(f, "last_dir=%s\n", s->last_dir);
-    fclose(f);
+
+    bool ok = !ferror(f);
+    if (fclose(f) != 0) ok = false;
+    if (!ok) {
+        remove(temp_path);
+        return false;
+    }
+    char backup_path[sizeof(SETTINGS_PATH) + 8];
+    snprintf(backup_path, sizeof(backup_path), "%s.bak", SETTINGS_PATH);
+    bool had_old = false;
+    FILE *old = fopen(SETTINGS_PATH, "r");
+    if (old) {
+        fclose(old);
+        remove(backup_path);
+        if (rename(SETTINGS_PATH, backup_path) != 0) {
+            remove(temp_path);
+            return false;
+        }
+        had_old = true;
+    }
+    if (rename(temp_path, SETTINGS_PATH) != 0) {
+        if (had_old) rename(backup_path, SETTINGS_PATH);
+        remove(temp_path);
+        return false;
+    }
+    if (had_old) remove(backup_path);
     return true;
 }

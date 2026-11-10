@@ -19,6 +19,8 @@ typedef struct {
     bool show_batt;                  /* top-screen battery percentage */
     int  glow;                       /* ambient glow around the cover: 0 = off, 1 = soft, 2 = vivid */
     int  fade_speed;                 /* cover / glow fade-in: 0 = quick, 1 = smooth, 2 = slow */
+    int  display_mode;                /* 0 = album cover, 1 = spectrum, 2 = waveform, 3 = orbit */
+    int  wallpaper;                   /* built-in wallpaper style, 0..4 */
     int  seek_step;                  /* D-pad Left/Right skip length in seconds (5 / 10 / 15 / 30) */
     bool setup_done;                 /* first-run setup + guide has been completed */
     bool shuffle;

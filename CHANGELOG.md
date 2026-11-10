@@ -34,3 +34,9 @@
 ### Internal
 - Glow vertex colours are cached; the playing-song check no longer formats a path string per row per frame.
 - Clean under `-Wall -Wextra -Wshadow` and the clang static analyzer; defensive NULL checks in the audio decoders.
+
+
+## Stability update
+- Settings and Favorites are written through temporary files before replacement, reducing the chance of losing the previous saved data after an interrupted SD-card write.
+- Failed settings saves remain marked dirty and are retried instead of silently discarding unsaved changes.
+- CIA/Home Menu publisher metadata now credits GRIMZZZZ.
