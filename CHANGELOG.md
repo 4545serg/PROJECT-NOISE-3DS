@@ -20,7 +20,9 @@
 - Softened the ambient lighting and top-screen background wash for more restrained contrast.
 - **D-pad Left/Right** now skip back / forward; **L / R** now play the previous / next song.
 - Skipping a song shows what is playing and moves the list highlight to it.
-- First-run setup shortened from six steps to three; theme, accent, glow, clock and battery share one page.
+- First-run setup shortened from six steps to three; theme, glow, clock and battery share one page.
+- Simplified Appearance by removing the separate accent-colour picker; each theme now supplies its own coordinated colours.
+- Improved Up Next guidance: larger, lower-positioned instructions clearly explain Y to queue and X to prioritize a song.
 - Cover-flow reflections and dimmed covers blend into the real (glow-tinted) background.
 
 ### Fixed

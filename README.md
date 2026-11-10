@@ -57,8 +57,8 @@ folder once ("Searching..." for a moment on big libraries); after that, searches
 It searches names, not ID3 tags - name your files `Artist - Title.mp3` (or keep them in Artist/Album folders) for best results.
 
 **Settings (SELECT):** three tabs. The queue button at the right end of the mini-player opens the dedicated **Up Next** screen; it keeps transport controls available while you review the queue.
-- **Appearance** - a theme preset (Noise, Emerald, Ocean, Sunset, Mono), an accent colour swatch and the **Ambient glow**
-  (Off / Soft / Vivid).
+- **Appearance** - choose a theme preset (Noise, Emerald, Ocean, Sunset, Mono), then keep it simple with **Ambient glow**
+  (Off / Soft / Vivid) and **Cover fade** (Quick / Smooth / Slow). Theme colours are coordinated automatically; there is no separate accent picker.
 - **Audio** - a **Manual EQ** switch and a **5-band equalizer** shown as five **vertical sliders** (60 Hz, 230 Hz,
   910 Hz, 3.6 kHz, 14 kHz, -12..+12 dB, with the gain above each slider) and presets (Flat, Bass Boost, Treble, Vocal, Rock, Pop).
   The 3DS hardware volume slider controls listening volume. Manual EQ **off**: the chosen preset plays and the sliders show its curve (greyed, locked; touching one reminds you to turn Manual EQ on).
@@ -74,7 +74,7 @@ Everything saves automatically to `SD:/3ds/PROJECT_NOISE/settings.cfg`, along wi
 shuffle, repeat, EQ and the last folder, and is restored on next launch.
 
 **First launch:** a three-step setup runs once - (1) welcome + a check that sound and the music folder are ready,
-(2) **Make it yours**: theme, accent, ambient glow, clock and battery on a single page, with the top screen showing
+(2) **Make it yours**: theme, ambient glow, clock and battery on a single page, with the top screen showing
 the result live, (3) the controls cheat-sheet. Use the touch buttons or A = Next, B = Back; *Skip* leaves it early.
 The equalizer and skip length live in Settings. Replay the setup any time from Settings > General > *Show setup guide*.
 

@@ -48,7 +48,7 @@
 #define EQ_TRK_Y1  201         /* ... -12 dB at the bottom           */
 
 enum {                         /* settings rows, grouped in three pages */
-    ROW_PRESET, ROW_ACCENT, ROW_GLOW, ROW_FADE,                              /* Look    */
+    ROW_PRESET, ROW_GLOW, ROW_FADE,                                          /* Look    */
     ROW_EQMAN, ROW_EQPRE, ROW_B0, ROW_B1, ROW_B2, ROW_B3, ROW_B4,        /* Audio   */
     ROW_SEEK, ROW_CLOCK, ROW_BATT, ROW_SLEEP_ENABLE, ROW_SLEEP_TIMER, ROW_GUIDE, ROW_EXIT, /* General */
     SET_ROWS
@@ -57,11 +57,11 @@ enum {                         /* settings rows, grouped in three pages */
 /* "Cards" are lists of settings rows drawn as one inset panel. Cards 0 and 2 are the Look and General
  * tabs (the Sound tab has its own layout); CARD_SETUP is the single combined page of the first-run setup. */
 enum { CARD_LOOK, CARD_SOUND, CARD_GENERAL, CARD_SETUP, CARD_COUNT };
-static const int   ROWS_LOOK[]    = { ROW_PRESET, ROW_ACCENT, ROW_GLOW, ROW_FADE };
+static const int   ROWS_LOOK[]    = { ROW_PRESET, ROW_GLOW, ROW_FADE };
 static const int   ROWS_GENERAL[] = { ROW_SEEK, ROW_CLOCK, ROW_BATT, ROW_SLEEP_ENABLE, ROW_SLEEP_TIMER, ROW_GUIDE, ROW_EXIT };
-static const int   ROWS_SETUP[]   = { ROW_PRESET, ROW_ACCENT, ROW_GLOW, ROW_CLOCK, ROW_BATT };
+static const int   ROWS_SETUP[]   = { ROW_PRESET, ROW_GLOW, ROW_CLOCK, ROW_BATT };
 static const int  *CARD_ROWS[CARD_COUNT] = { ROWS_LOOK, NULL, ROWS_GENERAL, ROWS_SETUP };
-static const int   CARD_LEN[CARD_COUNT]  = { 4, 0, 7, 5 };
+static const int   CARD_LEN[CARD_COUNT]  = { 3, 0, 7, 4 };
 static const float CARD_ROWH[CARD_COUNT] = { 38.0f, 0.0f, 22.0f, 25.0f };
 static const int   TAB_FIRST[3]          = { ROW_PRESET, ROW_EQMAN, ROW_SEEK };
 static const char *PAGE_NAMES[3]         = { "Appearance", "Audio", "General" };
@@ -649,23 +649,6 @@ static void ensure_meta(Entry *e)
 
 
 /* --------------------------------------------------------------- settings */
-#define ACCENT_N 9
-static const u32 ACCENTS[ACCENT_N] = {           /* blue cyan green yellow orange red pink purple white */
-    0x3D9CFF, 0x39B8D6, 0x35D07F, 0xFFC933, 0xFF7A45, 0xFF5A5F, 0xFF6FB5, 0xA78BFA, 0xFFFFFF
-};
-#define PAL_X0   70            /* accent swatches: left edge and spacing (px) */
-#define PAL_STEP 26
-
-static Rgb hex_rgb(u32 v) { Rgb c = { (u8)(v >> 16), (u8)(v >> 8), (u8)v }; return c; }
-
-static int accent_index(void)
-{
-    u32 rgb = ((u32)S.accent.r << 16) | ((u32)S.accent.g << 8) | S.accent.b;
-    for (int i = 0; i < ACCENT_N; i++)
-        if (ACCENTS[i] == rgb) return i;
-    return -1;
-}
-
 static bool is_slider_row(int r) { return r >= ROW_B0 && r <= ROW_B4; }
 static int  row_page(int r)      { return r < ROW_EQMAN ? 0 : (r < ROW_SEEK ? 1 : 2); }
 
@@ -763,10 +746,6 @@ static void set_adjust(int dir)
         if (p < 0) p = PRESET_COUNT - 1;
         if (p >= PRESET_COUNT) p = 0;
         settings_apply_preset(&S, p);
-    } else if (set_row == ROW_ACCENT) {
-        int i = accent_index();
-        i = (i < 0) ? (dir > 0 ? 0 : ACCENT_N - 1) : (i + dir + ACCENT_N) % ACCENT_N;
-        S.accent = hex_rgb(ACCENTS[i]);
     } else if (set_row == ROW_EQMAN) {
         S.eq_manual = !S.eq_manual;
         if (S.eq_manual) {                    /* first time on: start from the curve you were hearing */
@@ -1372,17 +1351,17 @@ static void draw_queue(void)
     draw_text("Up Next", 12, 3, 0.85f, cText, C2D_AlignLeft, 180);
     char count[32]; snprintf(count, sizeof count, "%d queued", manual_queue_count);
     draw_text(count, 246, 9, 0.40f, cDim, C2D_AlignRight, 80);
-    draw_text("Tap a song to play it now", 14, 23, 0.40f, cDim, C2D_AlignLeft, 220);
+    draw_text("Tap a song to play it next", 14, 29, 0.47f, cDim, C2D_AlignLeft, 230);
     rrect(260, 5, 52, 22, 11, 0.30f, cAcc);
     draw_text("Done", 286, 10, 0.42f, C(S.bg), C2D_AlignCenter, 0);
 
     if (manual_queue_count == 0) {
-        rrect(18, 54, 284, 112, 12, 0.28f, cCard);
-        C2D_DrawCircleSolid(160, 86, 0.30f, 19, cSel);
-        icon_note(153, 78, cAcc);
-        draw_text("Nothing queued yet", 160, 116, 0.56f, cText, C2D_AlignCenter, 270);
-        draw_text("Browse your music and press Y to add a song", 160, 139, 0.37f, cDim, C2D_AlignCenter, 270);
-        draw_text("Press X to put it at the front of Up Next", 160, 153, 0.34f, cDim, C2D_AlignCenter, 270);
+        rrect(18, 50, 284, 126, 12, 0.28f, cCard);
+        C2D_DrawCircleSolid(160, 82, 0.30f, 19, cSel);
+        icon_note(153, 74, cAcc);
+        draw_text("Nothing queued yet", 160, 111, 0.58f, cText, C2D_AlignCenter, 270);
+        draw_text("Browse music and press Y to queue a song", 160, 140, 0.44f, cDim, C2D_AlignCenter, 280);
+        draw_text("Press X to put it at the front of Up Next", 160, 158, 0.42f, cDim, C2D_AlignCenter, 280);
     } else {
         const int visible = 4;
         if (queue_sel < queue_scroll) queue_scroll = queue_sel;
@@ -1496,18 +1475,6 @@ static void draw_card(int card)
             row_text(buf, 236, y, rh, 0.5f, cAcc, C2D_AlignCenter, 92);
             chevron(176, cy, false, cDim);
             chevron(296, cy, true, cDim);
-        } else if (r == ROW_ACCENT) {
-            row_text("Accent", 18, y, rh, 0.5f, cText, C2D_AlignLeft, 50);
-            int ai = accent_index();
-            const float sr = tight ? 7.5f : 9.5f;                              /* swatch radius */
-            for (int k = 0; k < ACCENT_N; k++) {
-                float sx = PAL_X0 + PAL_STEP * k + PAL_STEP / 2.0f;
-                if (k == ai) {
-                    C2D_DrawCircleSolid(sx, cy, 0.38f, sr + 3.0f, cText);
-                    C2D_DrawCircleSolid(sx, cy, 0.39f, sr + 1.0f, on ? cHi : cCard);
-                }
-                C2D_DrawCircleSolid(sx, cy, 0.40f, (k == ai) ? sr - 1.0f : sr, C(hex_rgb(ACCENTS[k])));
-            }
         } else if (r == ROW_GLOW) {
             if (!tight) {
                 float ty = y + (rh - 30.0f) / 2.0f;
@@ -1938,14 +1905,6 @@ static void handle_header_tap(int px)    /* search and Favorites shortcuts */
     else open_search();
 }
 
-static void set_accent(int i)
-{
-    if (i < 0) i = 0;
-    if (i >= ACCENT_N) i = ACCENT_N - 1;
-    S.accent = hex_rgb(ACCENTS[i]);
-    mark_dirty();
-}
-
 /* touch on a settings card (Settings tabs and setup steps share this) */
 static void card_touch(touchPosition tp, int card)
 {
@@ -1963,8 +1922,6 @@ static void card_touch(touchPosition tp, int card)
     } else if (is_choice_row(r)) {
         if (tp.px >= 150 && tp.px < 232)      set_adjust(-1);
         else if (tp.px >= 232)                set_adjust(+1);
-    } else if (r == ROW_ACCENT) {
-        if (tp.px >= PAL_X0) set_accent(((int)tp.px - PAL_X0) / PAL_STEP);
     }
 }
 
