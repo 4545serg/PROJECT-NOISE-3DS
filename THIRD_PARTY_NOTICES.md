@@ -15,7 +15,8 @@ the libraries below.
 | devkitARM / devkitPro tools | Toolchain, 3dsxtool, smdhtool | Various (GPL with linking exceptions for the runtime) | https://devkitpro.org |
 
 `minimp3.h`, `stb_image.h` and `dr_flac.h` are not stored in this repository; `tools/get_deps.sh`
-downloads them at build time and each file carries its own license text in its header.
+downloads them at build time (the latest `master` by default, or the commits you pin with
+`MINIMP3_REF`, `STB_REF` and `DRLIBS_REF`) and each file carries its own license text in its header.
 
 Build-time-only tools for the CIA (not linked into the app): makerom
 (https://github.com/3DSGuy/Project_CTR) and bannertool (https://github.com/Steveice10/bannertool).

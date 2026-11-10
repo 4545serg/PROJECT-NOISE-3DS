@@ -1,8 +1,5 @@
-/* dr_flac (public domain / MIT-0, https://github.com/mackron/dr_libs) - single translation unit
- * that holds the implementation. Header is fetched by tools/get_deps.sh. */
+/* dr_flac (public domain / MIT-0, https://github.com/mackron/dr_libs) - the single translation
+ * unit that holds the implementation. The header is fetched by tools/get_deps.sh. */
+#include "libcfg.h"
 #define DR_FLAC_IMPLEMENTATION
-#define DR_FLAC_NO_OGG
-#define DR_FLAC_NO_CRC
-#define DR_FLAC_NO_SIMD
-#define DR_FLAC_NO_WCHAR
 #include "dr_flac.h"

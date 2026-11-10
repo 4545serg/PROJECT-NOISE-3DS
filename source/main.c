@@ -329,6 +329,7 @@ static void play_manual_queue_head(void)
     size_t art_size = 0;
     if (!meta_read(path, &m, &art, &art_size, true)) {
         snprintf(status_msg, sizeof status_msg, "Can't open queued file");
+        free(art);
         if (manual_queue_count > 0) play_manual_queue_head();
         return;
     }
@@ -337,6 +338,15 @@ static void play_manual_queue_head(void)
     snprintf(cur_path, sizeof cur_path, "%s", path);
     art_queue(art, art_size);
     if (audio_ok) { audio_play(path, m.audio_start); apply_lid(); }
+}
+
+/* Restart the track that is loaded right now (repeat-one). It may have come from Up Next rather than
+ * the playlist, so it is replayed from its own path instead of through Q / qi. */
+static void replay_current(void)
+{
+    if (!track_loaded || !audio_ok || cur_path[0] == 0) return;
+    audio_play(cur_path, cur.audio_start);
+    apply_lid();
 }
 
 static void queue_add_from_list(int row, bool play_next)
@@ -766,7 +776,14 @@ static void favorite_toggle(const char *path)
     else if (favorite_count < FAVORITE_LIMIT) snprintf(favorite_paths[favorite_count++], sizeof favorite_paths[0], "%s", path);
     favorites_dirty = true; favorites_save();
     toast(i >= 0 ? "Removed from Favorites" : "Added to Favorites");
-    if (L_is_favorites) show_favorites();
+    if (L_is_favorites) {                       /* rebuild the list but keep your place in it */
+        int keep_sel = sel, keep_top = scroll_top;
+        show_favorites();
+        sel = (keep_sel < L.n) ? keep_sel : (L.n > 0 ? L.n - 1 : 0);
+        scroll_top = keep_top;
+        clamp_scroll();
+        flow_pos = (float)sel;
+    }
 }
 static void show_favorites(void)
 {
@@ -841,18 +858,17 @@ static void set_adjust(int dir)
 /* touch / drag directly on an EQ band slider */
 static void slider_apply(int r, int px, int py)
 {
-    {
-        if (!S.eq_manual) return;
-        float f = (float)(EQ_TRK_Y1 - py) / (float)(EQ_TRK_Y1 - EQ_TRK_Y0);     /* 0 = bottom, 1 = top */
-        if (f < 0.0f) f = 0.0f;
-        if (f > 1.0f) f = 1.0f;
-        int v = (int)(f * 24.0f + 0.5f) - 12;
-        int b = r - ROW_B0;
-        if (v == S.eq_user[b]) return;
-        S.eq_user[b] = v;
-        settings_eq_refresh(&S);
-        eq_push();
-    }
+    (void)px;
+    if (!S.eq_manual) return;
+    float f = (float)(EQ_TRK_Y1 - py) / (float)(EQ_TRK_Y1 - EQ_TRK_Y0);     /* 0 = bottom, 1 = top */
+    if (f < 0.0f) f = 0.0f;
+    if (f > 1.0f) f = 1.0f;
+    int v = (int)(f * 24.0f + 0.5f) - 12;
+    int b = r - ROW_B0;
+    if (v == S.eq_user[b]) return;
+    S.eq_user[b] = v;
+    settings_eq_refresh(&S);
+    eq_push();
     mark_dirty();
 }
 
@@ -1417,7 +1433,7 @@ static void draw_browser(void)
             draw_text(name, lx, y + 3, 0.58f, col, C2D_AlignLeft, 224);
             char favpath[256]; entry_relative_path(e, favpath, sizeof favpath);
             bool fav = is_favorite(favpath);
-            draw_text(fav ? "♥" : "♡", 296, y + 7, 0.58f, fav ? cAcc : cDim, C2D_AlignCenter, 0);
+            draw_text("♥", 296, y + 7, 0.58f, fav ? cAcc : C(mix_rgb(S.text, S.bg, 190)), C2D_AlignCenter, 0);
             if (e->meta_loaded && e->artist[0]) {
                 draw_text(e->artist, lx, y + 21, 0.44f, cDim, C2D_AlignLeft, 224);
             } else if (L_is_search) {                              /* no artist tag: show which folder it lives in */
@@ -1452,7 +1468,7 @@ static void draw_queue(void)
     draw_text("Up Next", 12, 3, 0.85f, cText, C2D_AlignLeft, 180);
     char count[32]; snprintf(count, sizeof count, "%d queued", manual_queue_count);
     draw_text(count, 246, 9, 0.40f, cDim, C2D_AlignRight, 80);
-    draw_text("Tap a song to play it next", 14, 29, 0.47f, cDim, C2D_AlignLeft, 230);
+    draw_text("Tap a song to play it now", 14, 29, 0.47f, cDim, C2D_AlignLeft, 230);
     rrect(260, 5, 52, 22, 11, 0.30f, cAcc);
     draw_text("Done", 286, 10, 0.42f, C(S.bg), C2D_AlignCenter, 0);
 
@@ -1728,7 +1744,7 @@ static void draw_settings(void)
 
     /* title and listening-personalization subtitle */
     draw_text("Settings", 14, 5, 0.82f, cText, C2D_AlignLeft, 0);
-    draw_text("Make your listening experience yours", 15, 27, 0.47f, cDim, C2D_AlignLeft, 230);
+    draw_text("Look, sound and controls", 15, 27, 0.47f, cDim, C2D_AlignLeft, 230);
     rrect(250, 10, 62, 22, 11, 0.30f, cAcc);
     row_text("Done", 281, 10, 22, 0.45f, cBg, C2D_AlignCenter, 0);
 
@@ -1847,14 +1863,15 @@ static void draw_wizard_top(void)         /* welcome and controls pages (the set
         char skip[48];
         snprintf(skip, sizeof skip, "Left / Right: back / forward %d sec", S.seek_step);
         draw_text("Controls", 200, 18, 0.75f, cAcc, C2D_AlignCenter, 0);
-        wz_line("A",      "Play song / open folder",          50,  cAcc, cText);
-        wz_line("B",      "Pause",                            72,  cAcc, cText);
-        wz_line("L / R",  "Previous / next song",             94,  cAcc, cText);
-        wz_line("D-pad",  skip,                               116, cAcc, cText);
-        wz_line("",       "Up / Down: move through the list", 138, cAcc, cText);
-        wz_line("X / Y",  "Play next / Add to queue",                            160, cAcc, cText);
-        wz_line("SELECT", "Open Settings",                    182, cAcc, cText);
-        wz_line("START",  "Exit the app",                     204, cAcc, cText);
+        wz_line("A",      "Play song / open folder",          44,  cAcc, cText);
+        wz_line("B",      "Pause",                            63,  cAcc, cText);
+        wz_line("L / R",  "Previous / next song",             82,  cAcc, cText);
+        wz_line("D-pad",  skip,                               101, cAcc, cText);
+        wz_line("",       "Up / Down: move through the list", 120, cAcc, cText);
+        wz_line("X / Y",  "Play next / Add to queue",         139, cAcc, cText);
+        wz_line("ZL",     "Favorite / unfavorite a song",     158, cAcc, cText);
+        wz_line("SELECT", "Open Settings",                    177, cAcc, cText);
+        wz_line("START",  "Exit the app",                     196, cAcc, cText);
     }
 }
 
@@ -2178,7 +2195,7 @@ int main(void)
 
         /* ---- track end / error handling ---- */
         if (audio_take_finished()) {
-            if (S.repeat == 2) play_q(qi); else next_track(false);
+            if (S.repeat == 2) replay_current(); else next_track(false);
             follow_playing();
         }
         if (audio_take_error()) { snprintf(status_msg, sizeof status_msg, "Can't play this file"); apply_lid(); }
@@ -2261,9 +2278,7 @@ int main(void)
                 if (fl) set_adjust(-1);
                 if (fr) set_adjust(+1);
                 if (kd & KEY_A) {
-                    if (set_row == ROW_SLEEP_ENABLE) set_adjust(+1);
-                    else if (set_row == ROW_SLEEP_TIMER) set_adjust(+1);
-                    else if (is_switch_row(set_row) || set_row == ROW_CLOCK || set_row == ROW_GLOW || set_row == ROW_FADE || set_row == ROW_SEEK) set_adjust(+1);
+                    if (is_switch_row(set_row) || is_choice_row(set_row)) set_adjust(+1);
                     else if (set_row == ROW_GUIDE) start_wizard();
                     else if (set_row == ROW_EXIT) { confirm_exit = true; confirm_sel = 0; }
                 }

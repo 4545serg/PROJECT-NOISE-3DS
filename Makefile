@@ -1,35 +1,37 @@
 # PROJECT NOISE - Nintendo 3DS music player
-# make      -> project_noise.3dsx
-# make cia  -> project_noise.cia
-# make deps -> fetch MP3/FLAC/image decoder headers
+#
+#   make        -> project_noise.3dsx (+ .smdh)     needs devkitPro with the 3ds-dev group
+#   make cia    -> project_noise.cia                additionally needs makerom + bannertool on PATH
+#   make deps   -> fetch the MP3 / FLAC / image decoder headers (make does this on demand)
+#   make clean
 
 ifeq ($(strip $(DEVKITPRO)),)
-$(error "DEVKITPRO is not set. Install devkitPro and set DEVKITPRO")
+$(error "DEVKITPRO is not set. Install devkitPro (https://devkitpro.org/wiki/Getting_Started) and set DEVKITPRO")
 endif
 
 DEVKITARM ?= $(DEVKITPRO)/devkitARM
 export PATH := $(DEVKITPRO)/tools/bin:$(DEVKITARM)/bin:$(PATH)
 
-TARGET := project_noise
-BUILD := build
-APP_TITLE := PROJECT NOISE
-APP_DESC := Native music player
+TARGET     := project_noise
+BUILD      := build
+APP_TITLE  := PROJECT NOISE
+APP_DESC   := Native music player
 APP_AUTHOR := GRIMZZZZ
 
-ICON := resources/icon.png
+ICON       := resources/icon.png
 BANNER_IMG := resources/banner.png
 BANNER_WAV := resources/banner.wav
-RSF := resources/app.rsf
+RSF        := resources/app.rsf
 
-CTRULIB := $(DEVKITPRO)/libctru
-PORTLIBS := $(DEVKITPRO)/portlibs/3ds
-CC := $(DEVKITARM)/bin/arm-none-eabi-gcc
+CTRULIB    := $(DEVKITPRO)/libctru
+PORTLIBS   := $(DEVKITPRO)/portlibs/3ds
+CC         := $(DEVKITARM)/bin/arm-none-eabi-gcc
 
-ARCH := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
-CFLAGS := -g -Wall -O2 -std=gnu11 -mword-relocations -ffunction-sections -fdata-sections \
-          $(ARCH) -D__3DS__ -Isource -I$(CTRULIB)/include -I$(PORTLIBS)/include
+ARCH    := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
+CFLAGS  := -g -Wall -O2 -std=gnu11 -mword-relocations -ffunction-sections -fdata-sections \
+           $(ARCH) -D__3DS__ -Isource -I$(CTRULIB)/include -I$(PORTLIBS)/include
 LDFLAGS := -specs=3dsx.specs -g $(ARCH) -L$(CTRULIB)/lib -L$(PORTLIBS)/lib
-LIBS := -lcitro2d -lcitro3d -lctru -lm
+LIBS    := -lcitro2d -lcitro3d -lctru -lm
 
 SRCS := $(wildcard source/*.c)
 OBJS := $(patsubst source/%.c,$(BUILD)/%.o,$(SRCS))
@@ -37,12 +39,16 @@ HDRS := $(wildcard source/*.h)
 DEPS := source/minimp3.h source/stb_image.h source/dr_flac.h
 
 .PHONY: all cia deps clean
+.DELETE_ON_ERROR:
+
 all: $(TARGET).3dsx
 cia: $(TARGET).cia
 
 deps:
 	sh tools/get_deps.sh
 
+# One download script for all three headers; it only fetches what is missing and writes each
+# file atomically, so a parallel `make -j` is safe too.
 $(DEPS):
 	sh tools/get_deps.sh
 
