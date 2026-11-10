@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- **Up Next screen**: the mini-player queue button opens a dedicated queue view with song titles, folder context, immediate play, per-item removal and clear-all controls.
 - **Manual play queue**: press ZR on a selected song to enqueue it; queued songs play before the current folder playlist continues.
 - **Sleep timer** (5 / 10 / 15 / 30 / 45 / 60 minutes) in Settings > General, with a live countdown, start/reset and cancel controls.
 - **Favorites** library section with per-song heart toggles; favorites persist on SD and can be shuffled as a playlist.
@@ -13,6 +14,7 @@
 - Transport buttons flash briefly when pressed.
 
 ### Changed
+- Refined the top-screen now-playing layout with more breathing room around track metadata and the progress bar; surfaced the queue count in the status area.
 - Settings tabs are now **Appearance**, **Audio** and **General**; removed the D-pad/B help footer and the visible lid-playback option.
 - Removed the in-app volume control; DSP output is kept at unity gain so the physical 3DS volume slider controls loudness.
 - Softened the ambient lighting and top-screen background wash for more restrained contrast.

@@ -23,7 +23,7 @@ fades smoothly between covers. Folders and covers without art glow in your accen
 *Soft* / *Vivid* in Settings > Appearance > *Ambient glow*.
 
 **Bottom screen:** folder + music browser (starts in `SD:/Music/`) with a **search bar** in the header, the playing
-song is highlighted, touch controls: shuffle / previous / play-pause / next / repeat / menu (shuffle and repeat sit on
+song is highlighted, touch controls: shuffle / previous / play-pause / next / repeat / Up Next (shuffle and repeat sit on
 either side of the transport buttons and light up, with a dot underneath, when on; repeat-one shows a small "1").
 
 | Control | Action |
@@ -39,11 +39,11 @@ either side of the transport buttons and light up, with a dot underneath, when o
 | **Y** | Shuffle on / off (repeat: tap the repeat button on the touch screen) |
 | **ZR** | Add the selected song to the play queue; queued songs play before the folder playlist advances |
 | **ZL** | Favorite / unfavorite the selected song |
-| **Touch** | Tap a row to open/play, drag to scroll, tap the search bar or the on-screen buttons |
+| **Touch** | Tap a row to open/play, drag to scroll, tap the search bar, transport controls or the Up Next button |
 
 Music keeps playing while you browse folders or change settings. When a track ends the
 next one starts (respecting shuffle/repeat). The on-screen previous / next buttons change track; previous restarts the track if more than
-3 s have played. Press **ZR** on a highlighted song to add it to the manual queue.
+3 s have played. Press **ZR** on a highlighted song to add it to the manual queue. Tap the queue icon at the right of the mini-player to open **Up Next**; tap an item or press A to play it immediately, tap its × / press X to remove it, and press Y to clear the queue. The queue screen keeps the mini-player available.
 
 ### Searching
 
@@ -56,7 +56,7 @@ search bar (or the **Back** row) to return to the folder you searched from. The 
 folder once ("Searching..." for a moment on big libraries); after that, searches are instant.
 It searches names, not ID3 tags - name your files `Artist - Title.mp3` (or keep them in Artist/Album folders) for best results.
 
-**Settings (SELECT or the menu button):** three tabs.
+**Settings (SELECT):** three tabs. The queue button at the right end of the mini-player opens the dedicated **Up Next** screen; it keeps transport controls available while you review the queue.
 - **Appearance** - a theme preset (Noise, Emerald, Ocean, Sunset, Mono), an accent colour swatch and the **Ambient glow**
   (Off / Soft / Vivid).
 - **Audio** - a **Manual EQ** switch and a **5-band equalizer** shown as five **vertical sliders** (60 Hz, 230 Hz,
@@ -65,9 +65,10 @@ It searches names, not ID3 tags - name your files `Artist - Title.mp3` (or keep 
   Manual EQ **on**: your own slider settings play (the preset selector reads "User"). Your manual curve is
   remembered while you switch back and forth. Drag a slider up / down with the stylus or a finger; with the D-pad,
   Left/Right picks the band, Up/Down changes its gain, and A (or Left / Right past the first / last band) leaves the sliders.
-- **General** - **Skip length** (what D-pad Left/Right skip: 5 / 10 / 15 / 30 seconds), **Clock** (off / 12-hour / 24-hour)
-  and **Battery percentage**, shown in the top-screen corners; **Show setup guide** (replays the first-run guide) and
-  **Exit app** (asks for confirmation).
+- **General** - **Skip length** (what D-pad Left/Right skip: 5 / 10 / 15 / 30 seconds), **Clock** (off / 12-hour / 24-hour),
+  **Battery percentage**, and a clear **Sleep Timer** on/off switch with a 5 / 10 / 15 / 30 / 45 / 60-minute duration.
+  The active countdown appears on the top screen; changing the duration resets the running timer. **Show setup guide**
+  replays the first-run guide and **Exit app** asks for confirmation.
 
 Everything saves automatically to `SD:/3ds/PROJECT_NOISE/settings.cfg`, along with
 shuffle, repeat, EQ and the last folder, and is restored on next launch.

@@ -107,6 +107,7 @@ void settings_load(Settings *s)
             value[--n] = '\0';
 
         unsigned parsed = 0;
+        int parsed_int = 0;
         if (!strcmp(key, "bg") && sscanf(value, "%x", &parsed) == 1)
             s->bg = from_hex(parsed);
         else if (!strcmp(key, "text") && sscanf(value, "%x", &parsed) == 1)
@@ -115,10 +116,10 @@ void settings_load(Settings *s)
             s->accent = from_hex(parsed);
         else if (!strcmp(key, "select") && sscanf(value, "%x", &parsed) == 1)
             s->select = from_hex(parsed);
-        else if (!strcmp(key, "preset") && sscanf(value, "%d", (int *)&parsed) == 1)
-            s->preset = (int)parsed;
-        else if (!strcmp(key, "eq_preset") && sscanf(value, "%d", (int *)&parsed) == 1)
-            s->eq_preset = (int)parsed;
+        else if (!strcmp(key, "preset") && sscanf(value, "%d", &parsed_int) == 1)
+            s->preset = parsed_int;
+        else if (!strcmp(key, "eq_preset") && sscanf(value, "%d", &parsed_int) == 1)
+            s->eq_preset = parsed_int;
         else if (!strcmp(key, "eq_user") || !strcmp(key, "eq")) {      /* "eq" = older settings files */
             int g[EQ_BANDS];
             if (sscanf(value, "%d,%d,%d,%d,%d", &g[0], &g[1], &g[2], &g[3], &g[4]) == EQ_BANDS)
@@ -142,8 +143,8 @@ void settings_load(Settings *s)
             s->shuffle = atoi(value) != 0;
         else if (!strcmp(key, "sleep_minutes"))
             s->sleep_minutes = atoi(value);
-        else if (!strcmp(key, "repeat") && sscanf(value, "%d", (int *)&parsed) == 1)
-            s->repeat = (int)parsed;
+        else if (!strcmp(key, "repeat") && sscanf(value, "%d", &parsed_int) == 1)
+            s->repeat = parsed_int;
         else if (!strcmp(key, "last_dir") &&
                  strncmp(value, MUSIC_ROOT, strlen(MUSIC_ROOT)) == 0)
             snprintf(s->last_dir, sizeof(s->last_dir), "%s", value);
