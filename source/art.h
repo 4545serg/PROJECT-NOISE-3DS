@@ -13,6 +13,7 @@ void  art_set_default(const unsigned char *data, size_t size);
 void  art_queue(unsigned char *data, size_t size);
 void  art_commit(void);
 bool  art_ready(void);
+unsigned art_serial(void);   /* increments each time a new cover actually becomes visible */
 const C2D_Image *art_image(void);
 void  art_shutdown(void);
 /* Build a standalone 128x128 texture from JPEG/PNG data (used by the cover-flow cache). */

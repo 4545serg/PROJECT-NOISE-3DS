@@ -23,6 +23,7 @@ static bool               g_pending_flag;
 
 static u32                g_color;                /* ambient colour of the artwork on screen */
 static bool               g_color_ok;
+static unsigned           g_serial;
 
 static u32 morton_interleave(u32 x, u32 y)
 {
@@ -222,6 +223,7 @@ void art_commit(void)
     g_pending_flag = false;
 
     release_tex();
+    g_serial++;
     g_color_ok = false;
     if (g_pending && g_pending_size) g_have = build_texture(g_pending, g_pending_size, true);
     if (!g_have && g_default && g_default_size) g_have = build_texture(g_default, g_default_size, false);
@@ -231,6 +233,7 @@ void art_commit(void)
 }
 
 bool art_ready(void) { return g_have; }
+unsigned art_serial(void) { return g_serial; }
 const C2D_Image *art_image(void) { return &g_img; }
 
 void art_shutdown(void)

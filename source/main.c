@@ -41,31 +41,31 @@
 #define SND_VOL_H  24
 #define SND_CTL_Y  (SND_TOP + SND_VOL_H)
 #define SND_CTL_H  24
-#define SND_EQ_Y   (SND_CTL_Y + SND_CTL_H)
+#define SND_EQ_Y   (SND_CTL_Y + SND_CTL_H + 22)
 #define SND_BOTTOM 220
 #define EQ_COL_X0  40          /* left edge of the first band column */
 #define EQ_COL_W   54
-#define EQ_TRK_Y0  129         /* slider track: +12 dB at the top ... */
-#define EQ_TRK_Y1  195         /* ... -12 dB at the bottom           */
+#define EQ_TRK_Y0  151         /* slider track: +12 dB at the top ... */
+#define EQ_TRK_Y1  197         /* ... -12 dB at the bottom           */
 
 enum {                         /* settings rows, grouped in three pages */
-    ROW_PRESET, ROW_ACCENT, ROW_GLOW,                                          /* Look    */
-    ROW_VOL, ROW_EQMAN, ROW_EQPRE, ROW_B0, ROW_B1, ROW_B2, ROW_B3, ROW_B4,    /* Sound   */
-    ROW_SEEK, ROW_CLOCK, ROW_BATT, ROW_LID, ROW_GUIDE, ROW_EXIT,              /* General */
+    ROW_PRESET, ROW_ACCENT, ROW_GLOW, ROW_FADE, ROW_CAROUSEL,                /* Appearance */
+    ROW_VOL, ROW_EQMAN, ROW_EQPRE, ROW_AUDIO_FADE, ROW_B0, ROW_B1, ROW_B2, ROW_B3, ROW_B4, /* Audio */
+    ROW_SEEK, ROW_CLOCK, ROW_BATT, ROW_LID, ROW_SLEEP_TIMER, ROW_GUIDE, ROW_EXIT, /* General */
     SET_ROWS
 };
 
 /* "Cards" are lists of settings rows drawn as one inset panel. Cards 0 and 2 are the Look and General
  * tabs (the Sound tab has its own layout); CARD_SETUP is the single combined page of the first-run setup. */
 enum { CARD_LOOK, CARD_SOUND, CARD_GENERAL, CARD_SETUP, CARD_COUNT };
-static const int   ROWS_LOOK[]    = { ROW_PRESET, ROW_ACCENT, ROW_GLOW };
-static const int   ROWS_GENERAL[] = { ROW_SEEK, ROW_CLOCK, ROW_BATT, ROW_LID, ROW_GUIDE, ROW_EXIT };
+static const int   ROWS_LOOK[]    = { ROW_PRESET, ROW_ACCENT, ROW_GLOW, ROW_FADE, ROW_CAROUSEL };
+static const int   ROWS_GENERAL[] = { ROW_SEEK, ROW_CLOCK, ROW_BATT, ROW_LID, ROW_SLEEP_TIMER, ROW_GUIDE, ROW_EXIT };
 static const int   ROWS_SETUP[]   = { ROW_PRESET, ROW_ACCENT, ROW_GLOW, ROW_CLOCK, ROW_BATT };
 static const int  *CARD_ROWS[CARD_COUNT] = { ROWS_LOOK, NULL, ROWS_GENERAL, ROWS_SETUP };
-static const int   CARD_LEN[CARD_COUNT]  = { 3, 0, 6, 5 };
-static const float CARD_ROWH[CARD_COUNT] = { 46.0f, 0.0f, 26.0f, 25.0f };
+static const int   CARD_LEN[CARD_COUNT]  = { 5, 0, 7, 5 };
+static const float CARD_ROWH[CARD_COUNT] = { 33.0f, 0.0f, 22.0f, 25.0f };
 static const int   TAB_FIRST[3]          = { ROW_PRESET, ROW_VOL, ROW_SEEK };
-static const char *PAGE_NAMES[3]         = { "Look", "Sound", "General" };
+static const char *PAGE_NAMES[3]         = { "Appearance", "Audio", "General" };
 
 #define TOP_W   400            /* screen sizes in pixels */
 #define BOT_W   320
@@ -85,7 +85,19 @@ static int       sel = 0, scroll_top = 0;
 
 /* song search: L (or Q) holds search results instead of a folder's contents */
 static bool      L_is_search = false;
+static bool      L_is_favorites = false;
+#define FAVORITE_LIMIT 512
+static char      favorite_paths[FAVORITE_LIMIT][256];
+static int       favorite_count = 0;
+static bool      favorites_dirty = false;
+static bool      sleep_timer_active = false;
+static u64       sleep_timer_deadline = 0;
+static bool      paused_for_sleep = false;
+static bool      lid_closed = false;
+static int       shell_poll_frames = 0;
+static aptHookCookie lid_hook_cookie;
 static bool      Q_is_search = false;
+static bool      Q_is_favorites = false;
 static char      search_q[192];               /* the query being shown                 */
 static char      pre_name[256];               /* entry that was selected before searching */
 static int       search_busy = 0;             /* >0: "Searching..." screen is up, scan runs when it hits 0 */
@@ -115,6 +127,13 @@ static bool      flow_show_prev = true;
 static float     amb_r = 61.0f, amb_g = 156.0f, amb_b = 255.0f, amb_k = 0.0f;
 static bool      amb_init = false;
 
+/* now-playing cover fade-in: 0..1, restarts whenever a new cover becomes visible */
+static float     art_fade = 1.0f;
+static unsigned  art_seen = 0;
+
+/* browsing = side covers wanted (the user is scrolling the library); otherwise the playing view is shown */
+static bool browsing_view(void) { return flow_show || !track_loaded; }
+
 /* exit confirmation dialog (START or Settings > Exit app) */
 static bool      confirm_exit = false;
 static int       confirm_sel = 0;             /* 0 = Cancel, 1 = Exit */
@@ -138,6 +157,9 @@ static float     ctrl_flash_x = 0.0f;
 #define CTRL_FLASH_FRAMES 10
 
 static void      toast(const char *msg);
+static void      apply_lid(void);
+static void      show_favorites(void);
+static void      favorites_save(void);
 
 static bool      audio_ok = false;
 static C2D_TextBuf tbuf;
@@ -285,6 +307,7 @@ static void play_q(int idx)
         return;
     }
     audio_play(path, m.audio_start);
+    apply_lid();
     status_msg[0] = 0;
 }
 
@@ -317,9 +340,10 @@ static void play_from_list(int row)
     if (row < 0 || row >= L.n || L.e[row].is_dir) return;
     flow_show = false;                 /* song chosen: side covers fold away */
     /* the playlist is whatever list the song was picked from: a folder's files or the search results */
-    if (Q.n == 0 || L_is_search || Q_is_search || strcmp(Q.dir, L.dir) != 0) {
+    if (Q.n == 0 || L_is_search || Q_is_search || L_is_favorites || L_is_favorites != Q_is_favorites || strcmp(Q.dir, L.dir) != 0) {
         dir_copy_files(&Q, &L);
         Q_is_search = L_is_search;
+        Q_is_favorites = L_is_favorites;
     }
     int idx = -1;
     for (int i = 0; i < Q.n; i++)
@@ -337,7 +361,7 @@ static void next_track(bool manual)
         n = qi + 1;
         if (n >= Q.n) {
             if (S.repeat == 1 || manual) n = 0;
-            else { audio_stop(); return; }
+            else { audio_stop(); apply_lid(); return; }
         }
     }
     play_q(n);
@@ -368,6 +392,7 @@ static void toggle_play(void)
 {
     if (audio_is_active()) {
         if (audio_is_paused()) audio_resume(); else audio_pause();
+        apply_lid();
     } else if (track_loaded && qi >= 0) {
         play_q(qi);
     } else if (sel < L.n && !L.e[sel].is_dir) {
@@ -403,7 +428,7 @@ static void follow_playing(void)
 
 static void set_dir(const char *path, const char *select_name)
 {
-    L_is_search = false;
+    L_is_search = false; L_is_favorites = false;
     if (!dir_load(&L, path) && !is_music_root(path)) dir_load(&L, MUSIC_ROOT);
     sel = 0;
     scroll_top = 0;
@@ -467,7 +492,7 @@ static void run_search(void)
     if (!L_is_search)
         snprintf(pre_name, sizeof pre_name, "%s", (L.n > 0 && sel < L.n) ? L.e[sel].name : "");
     search_run(&L, search_q);
-    L_is_search = true;
+    L_is_search = true; L_is_favorites = false;
     sel = (L.n > 1) ? 1 : 0;                          /* first match (row 0 is "Back") */
     scroll_top = 0;
     clamp_scroll();
@@ -543,7 +568,7 @@ static int  row_page(int r)      { return r < ROW_VOL ? 0 : (r < ROW_SEEK ? 1 : 
 
 static bool is_switch_row(int r) { return r == ROW_LID || r == ROW_BATT || r == ROW_EQMAN; }
 static bool is_band_row(int r)   { return r >= ROW_B0 && r <= ROW_B4; }
-static bool is_choice_row(int r) { return r == ROW_PRESET || r == ROW_EQPRE || r == ROW_CLOCK || r == ROW_GLOW || r == ROW_SEEK; }
+static bool is_choice_row(int r) { return r == ROW_PRESET || r == ROW_EQPRE || r == ROW_CLOCK || r == ROW_GLOW || r == ROW_FADE || r == ROW_CAROUSEL || r == ROW_AUDIO_FADE || r == ROW_SEEK || r == ROW_SLEEP_TIMER; }
 
 static int card_pos(int card, int row)            /* index of `row` inside a card, or -1 */
 {
@@ -553,7 +578,79 @@ static int card_pos(int card, int row)            /* index of `row` inside a car
 }
 
 static void eq_push(void) { audio_set_eq(S.eq); }
-static void apply_lid(void) { aptSetSleepAllowed(!S.lid_play); }   /* closing the lid no longer sleeps the 3DS */
+static void apply_lid(void) { aptSetSleepAllowed(!(S.lid_play && audio_is_active() && !audio_is_paused())); }
+
+static const int SLEEP_CHOICES[6] = { 5, 10, 15, 30, 45, 60 };
+static int sleep_choice_index(void) { for (int i=0;i<6;i++) if (S.sleep_minutes == SLEEP_CHOICES[i]) return i; return 2; }
+static void sleep_timer_start_or_reset(void)
+{
+    bool was_active = sleep_timer_active;
+    sleep_timer_deadline = osGetTime() + (u64)S.sleep_minutes * 60000ULL;
+    sleep_timer_active = true;
+    toast(was_active ? "Sleep timer reset" : "Sleep timer started");
+}
+static void sleep_timer_cancel(void)
+{
+    if (sleep_timer_active) { sleep_timer_active = false; toast("Sleep timer cancelled"); }
+}
+static void apt_lid_hook(APT_HookType hook, void *param)
+{
+    (void)param;
+    if (hook == APTHOOK_ONSLEEP) {
+        paused_for_sleep = !S.lid_play && audio_is_active() && !audio_is_paused();
+        if (paused_for_sleep) audio_pause();
+    } else if (hook == APTHOOK_ONWAKEUP) {
+        if (paused_for_sleep) { audio_resume(); paused_for_sleep = false; }
+    }
+}
+static void favorites_load(void)
+{
+    FILE *f = fopen(FAVORITES_PATH, "r"); char line[300];
+    if (!f) return;
+    while (fgets(line, sizeof line, f) && favorite_count < FAVORITE_LIMIT) {
+        size_t n = strlen(line); while (n && (line[n-1]=='\n' || line[n-1]=='\r')) line[--n]=0;
+        if (!n || line[0]=='/' || strstr(line, "../") || strstr(line, "/..") || strstr(line, "\\") || !is_audio_file(line)) continue;
+        snprintf(favorite_paths[favorite_count++], sizeof favorite_paths[0], "%s", line);
+    }
+    fclose(f);
+}
+static void favorites_save(void)
+{
+    mkdir(DATA_ROOT, 0777); mkdir(DATA_DIR, 0777);
+    FILE *f = fopen(FAVORITES_PATH, "w"); if (!f) return;
+    for (int i=0;i<favorite_count;i++) fprintf(f, "%s\n", favorite_paths[i]);
+    fclose(f); favorites_dirty = false;
+}
+static int favorite_index(const char *path)
+{
+    for (int i=0;i<favorite_count;i++) if (!strcmp(favorite_paths[i], path)) return i;
+    return -1;
+}
+static bool is_favorite(const char *path) { return favorite_index(path) >= 0; }
+static void entry_relative_path(const Entry *e, char *out, size_t cap)
+{
+    const char *sub = L.dir;
+    size_t root_len = strlen(MUSIC_ROOT);
+    if (strncmp(sub, MUSIC_ROOT, root_len) == 0) sub += root_len;
+    if (*sub) snprintf(out, cap, "%s%s%s", sub, (sub[strlen(sub)-1] == '/' ? "" : "/"), e->name);
+    else snprintf(out, cap, "%s", e->name);
+}
+static void favorite_toggle(const char *path)
+{
+    int i = favorite_index(path);
+    if (i >= 0) { memmove(&favorite_paths[i], &favorite_paths[i+1], (size_t)(favorite_count-i-1)*sizeof favorite_paths[0]); favorite_count--; }
+    else if (favorite_count < FAVORITE_LIMIT) snprintf(favorite_paths[favorite_count++], sizeof favorite_paths[0], "%s", path);
+    favorites_dirty = true; favorites_save();
+    toast(i >= 0 ? "Removed from Favorites" : "Added to Favorites");
+    if (L_is_favorites) show_favorites();
+}
+static void show_favorites(void)
+{
+    dir_free(&L); snprintf(L.dir, sizeof L.dir, "%s", MUSIC_ROOT);
+    for (int i=0;i<favorite_count;i++) dir_add(&L, favorite_paths[i], false);
+    L_is_search = false; L_is_favorites = true; sel = 0; scroll_top = 0; flow_show = true;
+    flow_reset(); flow_want_dirty = true; flow_pos = 0.0f; flow_vel = 0.0f;
+}
 
 static void set_adjust(int dir)
 {
@@ -604,6 +701,16 @@ static void set_adjust(int dir)
         S.clock_mode = (S.clock_mode + dir + 3) % 3;
     } else if (set_row == ROW_GLOW) {
         S.glow = (S.glow + dir + GLOW_COUNT) % GLOW_COUNT;
+    } else if (set_row == ROW_FADE) {
+        S.fade_speed = (S.fade_speed + dir + FADE_COUNT) % FADE_COUNT;
+    } else if (set_row == ROW_SLEEP_TIMER) {
+        int i = sleep_choice_index(); S.sleep_minutes = SLEEP_CHOICES[(i + dir + 6) % 6];
+    } else if (set_row == ROW_CAROUSEL) {
+        S.carousel_mode = (S.carousel_mode + dir + 3) % 3;
+        flow_want_dirty = true;
+    } else if (set_row == ROW_AUDIO_FADE) {
+        S.audio_fade = (S.audio_fade + dir + 3) % 3;
+        audio_set_fade_mode(S.audio_fade);
     } else if (set_row == ROW_SEEK) {
         int i = 0;
         for (int k = 0; k < SEEK_STEP_COUNT; k++) if (SEEK_STEPS[k] == S.seek_step) i = k;
@@ -706,7 +813,10 @@ static void ambient_update(float dt)
 {
     u32 rgb = 0;
     bool have = false;
-    if (flow_appear > 0.5f && L.n > 0) {
+    bool browsing = browsing_view();
+    if (!browsing) {
+        have = art_color(&rgb);                          /* playing view: always the playing track's cover */
+    } else if (L.n > 0) {
         int fi = (int)floorf(flow_pos + 0.5f);
         if (fi < 0) fi = 0;
         if (fi >= L.n) fi = L.n - 1;
@@ -714,8 +824,6 @@ static void ambient_update(float dt)
             if (is_current_row(fi) && art_ready()) have = art_color(&rgb);
             else have = flow_color(fi, &rgb);
         }
-    } else if (track_loaded) {
-        have = art_color(&rgb);
     }
     if (!have) rgb = ((u32)S.accent.r << 16) | ((u32)S.accent.g << 8) | S.accent.b;
 
@@ -723,7 +831,7 @@ static void ambient_update(float dt)
     float tk = GLOW_STRENGTH[S.glow];
     if (!amb_init) { amb_r = tr; amb_g = tg; amb_b = tb; amb_k = tk; amb_init = true; return; }
 
-    float a = 1.0f - expf(-dt * 7.0f);                   /* ~150 ms to settle on a new cover */
+    float a = 1.0f - expf(-dt * (browsing ? 3.6f : 2.4f));   /* slow, soft settle (~1 s) on a new cover */
     amb_r += (tr - amb_r) * a;
     amb_g += (tg - amb_g) * a;
     amb_b += (tb - amb_b) * a;
@@ -748,6 +856,7 @@ static void flow_update(void)          /* once per frame: animation + selection 
     /* critically damped spring: velocity carries over when the target moves, so held scrolling
      * glides instead of stepping, and a jump of several covers still ends softly */
     const float w0 = 18.0f;
+    if (!browsing_view()) { flow_pos = (float)sel; flow_vel = 0.0f; }   /* playing view: no sliding past other covers (shuffle jumps) */
     float x = flow_pos - (float)sel;
     flow_vel += (-w0 * w0 * x - 2.0f * w0 * flow_vel) * dt;
     flow_pos += flow_vel * dt;
@@ -761,6 +870,10 @@ static void flow_update(void)          /* once per frame: animation + selection 
 
     /* title/artist for the settled entry: one small file read, never while scrolling */
     if (flow_idle > 6 && sel >= 0 && sel < L.n && !L.e[sel].meta_loaded && !L.e[sel].is_dir) ensure_meta(&L.e[sel]);
+
+    unsigned as = art_serial();
+    if (as != art_seen) { art_seen = as; art_fade = 0.0f; }
+    else if (art_fade < 1.0f) { art_fade += dt / FADE_SECS[S.fade_speed]; if (art_fade > 1.0f) art_fade = 1.0f; }
 
     ambient_update(dt);
 }
@@ -854,6 +967,26 @@ static float progress_frac(u32 pos, u32 dur)
 static void draw_status_bar(void);
 static void row_text(const char *s, float x, float y, float rh, float sc, u32 col, u32 align, float maxw);
 
+/* Compact PCM-driven visualizer. It reuses the artwork stage, so the display modes
+ * remain readable on the 3DS top screen without adding another settings page. */
+static void draw_visualizer(float x, float y, float w, float h, int bars, bool compact)
+{
+    float level = audio_visualizer_level();
+    if (level < 0.025f) level = 0.025f;
+    if (level > 1.0f) level = 1.0f;
+    float gap = compact ? 2.0f : 3.0f;
+    float bw = (w - gap * (bars - 1)) / bars;
+    float base = y + h;
+    for (int i = 0; i < bars; i++) {
+        float wave = 0.28f + 0.72f * fabsf(sinf(eq_phase * (1.0f + (i % 5) * 0.13f) + i * 0.47f));
+        float bh = (compact ? 5.0f : 10.0f) + level * wave * (compact ? 17.0f : h * 0.78f);
+        if (bh > h) bh = h;
+        float bx = x + i * (bw + gap);
+        rrect(bx, base - bh, bw, bh, bw * 0.35f, 0.42f,
+              C(mix_rgb(S.accent, S.text, (i * 11) % 80)));
+    }
+}
+
 /* ------------------------------------------------ TOP: now playing screen */
 static void draw_top(void)
 {
@@ -865,10 +998,15 @@ static void draw_top(void)
     const float asz = 144, ax = 128, ay = 22;                          /* matches FACE / CY in flow.c */
     top_background();
 
-    bool use_flow = flow_appear > 0.01f && L.n > 0;
-    if (use_flow) {
+    bool visual_only = (S.carousel_mode == 1);
+    bool use_flow = !visual_only && flow_appear > 0.01f && L.n > 0;
+    if (visual_only) {
+        draw_visualizer(54, 48, 292, 112, 28, false);
+    } else if (use_flow) {
         FlowItem items[10];
         const int base = (int)floorf(flow_pos) - 4;
+        const int ci = (int)floorf(flow_pos + 0.5f);
+        const bool playing_view = !browsing_view();
         for (int i = 0; i < 10; i++) {
             int idx = base + i;
             memset(&items[i], 0, sizeof items[i]);
@@ -881,21 +1019,37 @@ static void draw_top(void)
                 items[i].kind = 2;
                 items[i].color = C(mix_rgb(bg_at(94), tile_color(e->name), 90));   /* subdued: the cover fades in from it */
                 items[i].fade = 1.0f;
-                items[i].tex = (is_current_row(idx) && art_ready()) ? art_image()->tex : flow_tex(idx, &items[i].fade);
+                if (playing_view && idx == ci && art_ready()) {          /* the playing cover fades in from the background */
+                    items[i].tex = art_image()->tex;
+                    items[i].color = top_bg_color(200.0f, 94.0f);
+                    float f = art_fade;
+                    items[i].fade = f * f * (3.0f - 2.0f * f);
+                } else if (is_current_row(idx) && art_ready()) {
+                    items[i].tex = art_image()->tex;
+                } else {
+                    items[i].tex = flow_tex(idx, &items[i].fade);
+                }
+                if (playing_view && idx == ci && !items[i].tex) items[i].kind = 0;   /* never a flat grey card while art loads */
             }
         }
         flow_draw(items, 10, base, flow_pos, flow_appear, top_bg_color);
+        if (S.carousel_mode == 2) draw_visualizer(139, 145, 122, 18, 20, true);
     } else if (art_ready()) {
-        C2D_DrawImageAt(*art_image(), ax, ay, 0.40f, NULL, asz / 128.0f, asz / 128.0f);
+        C2D_ImageTint tint;
+        float f = art_fade * art_fade * (3.0f - 2.0f * art_fade);
+        C2D_PlainImageTint(&tint, top_bg_color(200.0f, 94.0f), 1.0f - f);
+        C2D_DrawImageAt(*art_image(), ax, ay, 0.40f, f < 0.999f ? &tint : NULL, asz / 128.0f, asz / 128.0f);
+        if (S.carousel_mode == 2) draw_visualizer(139, 145, 122, 18, 20, true);
     } else {
         C2D_DrawRectSolid(ax, ay, 0.30f, asz, asz, cSel);
         icon_note(ax + asz / 2 - 7, ay + asz / 2 - 8, cDim);
+        if (S.carousel_mode == 2) draw_visualizer(139, 145, 122, 18, 20, true);
     }
 
     /* label above the cover; title and artist below it */
     const float TY = 170, AY = 192;                       /* title / artist rows */
     char head[40] = "NOW PLAYING";
-    if (use_flow && flow_appear > 0.5f) {                 /* browsing: describe the focused entry */
+    if (use_flow && flow_appear > 0.5f && browsing_view()) {   /* browsing: describe the focused entry */
         int fi = (int)floorf(flow_pos + 0.5f);                /* the cover that is visually in the middle */
         if (fi < 0) fi = 0;
         if (fi >= L.n) fi = L.n - 1;
@@ -1024,7 +1178,7 @@ static void draw_browser(void)
     u32 cDim = C(mix_rgb(S.text, S.bg, 120));
 
     /* large title: "Library" at the top level, the folder name inside a folder, "Results" while searching */
-    const char *title = L_is_search ? "Results" : "Library";
+    const char *title = L_is_search ? "Results" : (L_is_favorites ? "Favorites" : "Library");
     char fname[256] = "";
     if (!L_is_search && !is_music_root(L.dir)) {
         char tmp[512];
@@ -1035,7 +1189,8 @@ static void draw_browser(void)
         snprintf(fname, sizeof fname, "%s", sl ? sl + 1 : tmp);
         if (fname[0]) title = fname;
     }
-    draw_text(title, 12, 3, 0.85f, cText, C2D_AlignLeft, 126);
+    draw_text(title, 12, 3, 0.85f, cText, C2D_AlignLeft, 112);
+    draw_text("♥", 132, 5, 0.62f, L_is_favorites ? cAcc : cDim, C2D_AlignCenter, 0);
 
     /* search bar: tap to type; while showing results it holds the query and an "x" to clear it */
     {
@@ -1058,8 +1213,13 @@ static void draw_browser(void)
     if (L.n == 0) {
         C2D_DrawCircleSolid(160, 82, 0.30f, 26, cSel);
         icon_note(153, 73, cDim);
-        draw_text("No music here yet", 160, 116, 0.6f, cText, C2D_AlignCenter, 300);
-        draw_text("Copy .mp3, .flac or .wav files to SD:/Music/", 160, 140, 0.4f, cDim, C2D_AlignCenter, 300);
+        if (L_is_favorites) {
+            draw_text("No favorites yet", 160, 116, 0.6f, cText, C2D_AlignCenter, 300);
+            draw_text("Tap a song's heart to add it here", 160, 140, 0.4f, cDim, C2D_AlignCenter, 300);
+        } else {
+            draw_text("No music here yet", 160, 116, 0.6f, cText, C2D_AlignCenter, 300);
+            draw_text("Copy .mp3, .flac or .wav files to SD:/Music/", 160, 140, 0.4f, cDim, C2D_AlignCenter, 300);
+        }
     } else if (L_is_search && L.n <= 1) {                 /* only the "Back" row: nothing matched */
         draw_text("No songs match", 160, 104, 0.6f, cText, C2D_AlignCenter, 300);
         draw_text("Searches file and folder names in SD:/Music/", 160, 130, 0.4f, cDim, C2D_AlignCenter, 300);
@@ -1103,9 +1263,12 @@ static void draw_browser(void)
         } else {
             if (!e->meta_loaded && loads_this_frame < 1 && flow_idle > 2) { ensure_meta(e); loads_this_frame++; }
             const char *name = (e->meta_loaded && e->title[0]) ? e->title : base_name(e->name);
-            draw_text(name, lx, y + 3, 0.58f, col, C2D_AlignLeft, 254);
+            draw_text(name, lx, y + 3, 0.58f, col, C2D_AlignLeft, 224);
+            char favpath[256]; entry_relative_path(e, favpath, sizeof favpath);
+            bool fav = is_favorite(favpath);
+            draw_text(fav ? "♥" : "♡", 296, y + 7, 0.58f, fav ? cAcc : cDim, C2D_AlignCenter, 0);
             if (e->meta_loaded && e->artist[0]) {
-                draw_text(e->artist, lx, y + 21, 0.44f, cDim, C2D_AlignLeft, 254);
+                draw_text(e->artist, lx, y + 21, 0.44f, cDim, C2D_AlignLeft, 224);
             } else if (L_is_search) {                              /* no artist tag: show which folder it lives in */
                 char fd[256];
                 folder_of(e->name, fd, sizeof fd);
@@ -1230,12 +1393,35 @@ static void draw_card(int card)
             row_text(GLOW_NAMES[S.glow], 236, y, rh, 0.5f, S.glow ? cAcc : cDim, C2D_AlignCenter, 92);
             chevron(176, cy, false, cDim);
             chevron(296, cy, true, cDim);
+        } else if (r == ROW_FADE) {
+            if (!tight) {
+                float ty = y + (rh - 30.0f) / 2.0f;
+                draw_text("Cover fade", 18, ty, 0.5f, cText, C2D_AlignLeft, 150);
+                draw_text("Fade-in on new songs", 18, ty + 16, 0.34f, cDim, C2D_AlignLeft, 150);
+            } else {
+                row_text("Cover fade", 18, y, rh, 0.5f, cText, C2D_AlignLeft, 150);
+            }
+            row_text(FADE_NAMES[S.fade_speed], 236, y, rh, 0.5f, cAcc, C2D_AlignCenter, 92);
+            chevron(176, cy, false, cDim);
+            chevron(296, cy, true, cDim);
+        } else if (r == ROW_CAROUSEL) {
+            static const char *MODES[3] = { "Carousel", "Visualizer", "Both" };
+            row_text("Top display", 18, y, rh, 0.48f, cText, C2D_AlignLeft, 105);
+            row_text(MODES[S.carousel_mode], 236, y, rh, 0.46f, cAcc, C2D_AlignCenter, 100);
+            chevron(176, cy, false, cDim); chevron(296, cy, true, cDim);
         } else if (r == ROW_SEEK) {
             row_text("Skip length", 18, y, rh, 0.5f, cText, C2D_AlignLeft, 100);
             snprintf(buf, sizeof buf, "%d sec", S.seek_step);
             row_text(buf, 236, y, rh, 0.5f, cAcc, C2D_AlignCenter, 92);
             chevron(176, cy, false, cDim);
             chevron(296, cy, true, cDim);
+        } else if (r == ROW_SLEEP_TIMER) {
+            char timer_label[32];
+            if (sleep_timer_active) { u64 left = sleep_timer_deadline > osGetTime() ? sleep_timer_deadline - osGetTime() : 0; snprintf(timer_label, sizeof timer_label, "Cancel %02u:%02u", (unsigned)(left/60000), (unsigned)((left/1000)%60)); }
+            else snprintf(timer_label, sizeof timer_label, "%d min", S.sleep_minutes);
+            row_text("Sleep timer", 18, y, rh, 0.5f, cText, C2D_AlignLeft, 120);
+            row_text(timer_label, 236, y, rh, 0.48f, sleep_timer_active ? cAcc : cDim, C2D_AlignCenter, 110);
+            if (!sleep_timer_active) { chevron(176, cy, false, cDim); chevron(296, cy, true, cDim); }
         } else if (r == ROW_LID) {
             if (!tight) {
                 float ty = y + (rh - 30.0f) / 2.0f;
@@ -1318,9 +1504,19 @@ static void draw_sound(void)
         }
     }
 
-    /* -- vertical sliders -- */
-    if (!(set_row == ROW_EQMAN || set_row == ROW_EQPRE))
-        C2D_DrawRectSolid(18, SND_EQ_Y, 0.29f, 284, 1, cSel);
+    /* -- playback transition -- */
+    {
+        const float y = SND_CTL_Y + SND_CTL_H, cy = y + 11.0f;
+        static const char *FADES[3] = { "Off", "Short", "Gentle" };
+        if (set_row == ROW_AUDIO_FADE) {
+            rrect(8, y + 1, 304, 20, 8, 0.28f, cHi);
+            rrect(9, cy - 7, 3, 14, 1.5f, 0.32f, cAcc);
+        }
+        row_text("Track fades", 18, y, 22, 0.45f, cText, C2D_AlignLeft, 120);
+        row_text(FADES[S.audio_fade], 236, y, 22, 0.45f, cAcc, C2D_AlignCenter, 92);
+        chevron(176, cy, false, cDim); chevron(296, cy, true, cDim);
+    }
+    C2D_DrawRectSolid(18, SND_EQ_Y, 0.29f, 284, 1, cSel);
 
     static const char *BAND[EQ_BANDS] = { "60 Hz", "230 Hz", "910 Hz", "3.6 kHz", "14 kHz" };
     const float th = EQ_TRK_Y1 - EQ_TRK_Y0, mid = (EQ_TRK_Y0 + EQ_TRK_Y1) / 2.0f;
@@ -1352,7 +1548,7 @@ static void draw_sound(void)
         if (!locked) C2D_DrawCircleSolid(cx, ky, 0.43f, 3.5f, cText);
 
         if (g == 0) snprintf(buf, sizeof buf, "0"); else snprintf(buf, sizeof buf, "%+d", g);
-        draw_text(buf, cx, 109, 0.38f, locked ? cDim : ((focus || drag) ? cAcc : cText), C2D_AlignCenter, 0);
+        draw_text(buf, cx, 137, 0.38f, locked ? cDim : ((focus || drag) ? cAcc : cText), C2D_AlignCenter, 0);
         draw_text(BAND[i], cx, 204, 0.36f, sel ? cAcc : cDim, C2D_AlignCenter, 0);
     }
 }
@@ -1363,7 +1559,8 @@ static void draw_settings(void)
     u32 cDim = C(mix_rgb(S.text, S.bg, 120));
 
     /* large title + "Done" pill */
-    draw_text("Settings", 14, 2, 0.85f, cText, C2D_AlignLeft, 0);
+    draw_text("Settings", 14, 2, 0.82f, cText, C2D_AlignLeft, 0);
+    draw_text("Personalize your listening", 15, 19, 0.34f, cDim, C2D_AlignLeft, 180);
     rrect(250, 6, 62, 22, 11, 0.30f, cAcc);
     row_text("Done", 281, 6, 22, 0.45f, cBg, C2D_AlignCenter, 0);
 
@@ -1374,7 +1571,7 @@ static void draw_settings(void)
     for (int i = 0; i < 3; i++)
         row_text(PAGE_NAMES[i], 60 + i * 100, 36, 18, 0.45f, i == page ? cBg : cDim, C2D_AlignCenter, 0);
 
-    const char *hint = "D-pad  Move / adjust        B  Back";
+    const char *hint = (set_row == ROW_SLEEP_TIMER) ? "Left/Right  Choose time     A  Start / Reset     Tap value to cancel" : "D-pad  Move / adjust        B  Back";
     if (page == 1) {
         draw_sound();
         if (is_band_row(set_row)) hint = "D-pad  Left/Right band    Up/Down gain    A  Back";
@@ -1414,6 +1611,11 @@ static void draw_status_bar(void)
         }
     }
 
+    if (sleep_timer_active) {
+        u64 left = sleep_timer_deadline > osGetTime() ? sleep_timer_deadline - osGetTime() : 0;
+        char timer[24]; snprintf(timer, sizeof timer, "SLEEP %02u:%02u", (unsigned)(left/60000), (unsigned)((left/1000)%60));
+        draw_text(timer, 200, 2, 0.42f, cAcc, C2D_AlignCenter, 0);
+    }
     if (S.show_batt) {
         char b[8];
         if (batt_pct >= 0) snprintf(b, sizeof b, "%d%%", batt_pct); else snprintf(b, sizeof b, "--%%");
@@ -1643,8 +1845,9 @@ static void handle_ctrl_tap(int px, int py)      /* bottom bar: slider on top, b
     else               { flash_ctrl(298); settings_open = true; set_row = 0; }
 }
 
-static void handle_header_tap(int px)    /* the search bar: tap = type a query, "x" = leave the results */
+static void handle_header_tap(int px)    /* search and Favorites shortcuts */
 {
+    if (px >= 120 && px < SB_X0 - 2) { if (L_is_favorites) set_dir(S.last_dir, NULL); else show_favorites(); return; }
     if (px < SB_X0 - 4) return;
     if (L_is_search && px >= 316 - 30) exit_search();
     else open_search();
@@ -1673,7 +1876,8 @@ static void card_touch(touchPosition tp, int card)
     if (is_slider_row(r)) {
         if (tp.px >= SS_X0 - 12 && tp.px <= SS_X1 + 12) { set_drag = r; slider_apply(r, tp.px, tp.py); }
     } else if (is_choice_row(r)) {
-        if (tp.px >= 150 && tp.px < 232)      set_adjust(-1);
+        if (r == ROW_SLEEP_TIMER && tp.px >= 232) sleep_timer_cancel();
+        else if (tp.px >= 150 && tp.px < 232)      set_adjust(-1);
         else if (tp.px >= 232)                set_adjust(+1);
     } else if (r == ROW_ACCENT) {
         if (tp.px >= PAL_X0) set_accent(((int)tp.px - PAL_X0) / PAL_STEP);
@@ -1687,9 +1891,12 @@ static void sound_touch(touchPosition tp)
     if (tp.py < SND_CTL_Y) {                                   /* volume */
         set_row = ROW_VOL;
         if (tp.px >= SS_X0 - 12 && tp.px <= SS_X1 + 12) { set_drag = ROW_VOL; slider_apply(ROW_VOL, tp.px, tp.py); }
-    } else if (tp.py < SND_EQ_Y) {                             /* Manual EQ | preset */
+    } else if (tp.py < SND_CTL_Y + SND_CTL_H) {                /* Manual EQ | preset */
         if (tp.px < 158) { set_row = ROW_EQMAN; set_adjust(+1); }
         else { set_row = ROW_EQPRE; set_adjust(tp.px < 236 ? -1 : +1); }
+    } else if (tp.py < SND_EQ_Y) {                             /* track fade */
+        set_row = ROW_AUDIO_FADE;
+        set_adjust(tp.px < 160 ? -1 : +1);
     } else {                                                   /* band sliders */
         int b = ((int)tp.px - EQ_COL_X0) / EQ_COL_W;
         if (tp.px < EQ_COL_X0 || b < 0 || b >= EQ_BANDS) return;
@@ -1750,6 +1957,8 @@ int main(void)
 
     settings_defaults(&S);
     settings_load(&S);
+    favorites_load();
+    aptHook(&lid_hook_cookie, apt_lid_hook, NULL);
     apply_lid();
 
     mcu_ok = R_SUCCEEDED(mcuHwcInit());      /* battery percentage (optional) */
@@ -1757,6 +1966,7 @@ int main(void)
 
     audio_ok = audio_init();
     audio_set_volume(S.volume);
+    audio_set_fade_mode(S.audio_fade);
     eq_push();
     art_set_default(placeholder_png, placeholder_png_len);
     art_queue(NULL, 0);                 /* show the logo cover until a song with art plays */
@@ -1777,18 +1987,30 @@ int main(void)
         hidScanInput();
         u32 kd = hidKeysDown(), kh = hidKeysHeld(), ku = hidKeysUp();
         if (kh & KEY_TOUCH) hidTouchRead(&tp);
+        if (S.lid_play && ptm_ok) {
+            if (lid_closed || (++shell_poll_frames >= 15)) {
+                u8 shell_state = 1;
+                shell_poll_frames = 0;
+                if (R_SUCCEEDED(PTMU_GetShellState(&shell_state))) lid_closed = (shell_state == 0);
+            }
+        } else lid_closed = false;
         if (search_busy > 0) kd = kh = ku = 0;       /* "Searching..." is up: ignore input for those frames */
 
         bool dlg = confirm_exit;                  /* START asks before leaving */
         if (!dlg && (kd & KEY_START)) { confirm_exit = true; confirm_sel = 0; }
         if (quit_req) break;
 
+        /* ---- sleep timer: elapsed wall-clock time, including time spent in system sleep ---- */
+        if (sleep_timer_active && osGetTime() >= sleep_timer_deadline) {
+            sleep_timer_active = false; audio_stop(); apply_lid(); toast("Sleep timer ended");
+        }
+
         /* ---- track end / error handling ---- */
         if (audio_take_finished()) {
             if (S.repeat == 2) play_q(qi); else next_track(false);
             follow_playing();
         }
-        if (audio_take_error()) snprintf(status_msg, sizeof status_msg, "Can't play this file");
+        if (audio_take_error()) { snprintf(status_msg, sizeof status_msg, "Can't play this file"); apply_lid(); }
 
         /* ---- always-on playback keys ---- */
         if (!dlg && !wizard_open) {          /* L / R: previous / next song */
@@ -1832,14 +2054,14 @@ int main(void)
             }
             if (band) {
                 /* vertical sliders: Left/Right pick the band, Up/Down move it; the panel's ends lead out of it */
-                if (repeat_fire(kh, KEY_DLEFT, &hold_left))   set_row = (set_row > ROW_B0) ? set_row - 1 : ROW_EQPRE;
+                if (repeat_fire(kh, KEY_DLEFT, &hold_left))   set_row = (set_row > ROW_B0) ? set_row - 1 : ROW_AUDIO_FADE;
                 if (repeat_fire(kh, KEY_DRIGHT, &hold_right)) set_row = (set_row < ROW_B4) ? set_row + 1 : ROW_SEEK;
                 bool gu = repeat_fire(kh, KEY_DUP, &hold_up), gd = repeat_fire(kh, KEY_DDOWN, &hold_down);
                 if (is_band_row(set_row)) {
                     if (gu) set_adjust(+1);
                     if (gd) set_adjust(-1);
                 }
-                if (kd & KEY_A) set_row = ROW_EQPRE;
+                if (kd & KEY_A) set_row = ROW_AUDIO_FADE;
             } else {
                 if (repeat_fire(kh, KEY_DUP, &hold_up))     set_row = row_step(set_row, -1);
                 if (repeat_fire(kh, KEY_DDOWN, &hold_down)) set_row = row_step(set_row, +1);
@@ -1848,7 +2070,8 @@ int main(void)
                 if (fl) set_adjust(-1);
                 if (fr) set_adjust(+1);
                 if (kd & KEY_A) {
-                    if (is_switch_row(set_row) || set_row == ROW_CLOCK || set_row == ROW_GLOW || set_row == ROW_SEEK) set_adjust(+1);
+                    if (set_row == ROW_SLEEP_TIMER) sleep_timer_start_or_reset();
+                    else if (is_switch_row(set_row) || set_row == ROW_CLOCK || set_row == ROW_GLOW || set_row == ROW_FADE || set_row == ROW_CAROUSEL || set_row == ROW_AUDIO_FADE || set_row == ROW_SEEK) set_adjust(+1);
                     else if (set_row == ROW_GUIDE) start_wizard();
                     else if (set_row == ROW_EXIT) { confirm_exit = true; confirm_sel = 0; }
                 }
@@ -1863,12 +2086,13 @@ int main(void)
             if (kd & KEY_A) {
                 if (sel < L.n && L.e[sel].is_dir) activate(sel);
                 else if (sel < L.n && !is_current_row(sel)) play_from_list(sel);
-                else if (audio_is_paused()) audio_resume();
+                else if (audio_is_paused()) { audio_resume(); apply_lid(); }
                 else if (!audio_is_active()) toggle_play();
             }
-            if ((kd & KEY_B) && audio_is_active() && !audio_is_paused()) audio_pause();
+            if ((kd & KEY_B) && audio_is_active() && !audio_is_paused()) { audio_pause(); apply_lid(); }
             if (kd & KEY_X) open_search();
             if (kd & KEY_Y) { S.shuffle = !S.shuffle; mark_dirty(); }
+            if ((kd & KEY_ZL) && sel < L.n && !L.e[sel].is_dir) { char fp[256]; entry_relative_path(&L.e[sel], fp, sizeof fp); favorite_toggle(fp); }
 
             if (repeat_fire(kh, KEY_DUP, &hold_up))     move_sel(-1);
             if (repeat_fire(kh, KEY_DDOWN, &hold_down)) move_sel(+1);
@@ -1899,7 +2123,9 @@ int main(void)
                 tp_prev = tp;
             }
             if ((ku & KEY_TOUCH) && touch_in_list && !dragging) {
-                activate(scroll_top + ((int)tp_start.py - LIST_TOP) / ROW_H);
+                int row = scroll_top + ((int)tp_start.py - LIST_TOP) / ROW_H;
+                if (row >= 0 && row < L.n && !L.e[row].is_dir && tp_start.px >= 278) { char fp[256]; entry_relative_path(&L.e[row], fp, sizeof fp); favorite_toggle(fp); }
+                else activate(row);
             }
             if ((kh & KEY_TOUCH) && slider_drag) slider_frac = frac_from_px(tp.px);
             if ((ku & KEY_TOUCH) && slider_drag) { seek_to(slider_frac); slider_drag = false; }
@@ -1918,6 +2144,9 @@ int main(void)
         if (toast_t > 0) toast_t--;
         if (ctrl_flash_t > 0) ctrl_flash_t--;
         if (S.show_batt) { if (--batt_timer <= 0) { batt_poll(); batt_timer = 120; } }   /* every ~2 s */
+
+        /* ---- closed-lid playback: keep the audio/timer loop alive, but stop rendering and idle the UI CPU ---- */
+        if (S.lid_play && lid_closed) { svcSleepThread(100 * 1000 * 1000LL); continue; }
 
         /* ---- draw ---- */
         C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
@@ -1948,6 +2177,8 @@ int main(void)
 
     if (!L_is_search) snprintf(S.last_dir, sizeof S.last_dir, "%s", L.dir);     /* results aren't a folder */
     settings_save(&S);
+    if (favorites_dirty) favorites_save();
+    aptUnhook(&lid_hook_cookie);
 
     if (audio_ok) { audio_stop(); audio_exit(); }
     if (ptm_ok) ptmuExit();

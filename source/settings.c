@@ -21,6 +21,8 @@ const char *PRESET_NAMES[PRESET_COUNT] = {
 };
 
 const char *GLOW_NAMES[GLOW_COUNT] = { "Off", "Soft", "Vivid" };
+const char *FADE_NAMES[FADE_COUNT] = { "Quick", "Smooth", "Slow" };
+const float FADE_SECS[FADE_COUNT]   = { 0.5f, 1.1f, 2.0f };
 const int   SEEK_STEPS[SEEK_STEP_COUNT] = { 5, 10, 15, 30 };
 
 static const int eq_presets[EQ_PRESET_COUNT][EQ_BANDS] = {
@@ -81,8 +83,12 @@ void settings_defaults(Settings *s)
     s->volume = 80;
     s->glow = 2;
     s->seek_step = 5;
+    s->fade_speed = 1;
     settings_apply_eq_preset(s, 0);
     s->shuffle = false;
+    s->sleep_minutes = 15;
+    s->audio_fade = 1;
+    s->carousel_mode = 0;
     s->repeat = 1;
     snprintf(s->last_dir, sizeof(s->last_dir), "%s", MUSIC_ROOT);
 }
@@ -133,12 +139,20 @@ void settings_load(Settings *s)
             s->show_batt = atoi(value) != 0;
         else if (!strcmp(key, "glow"))
             s->glow = atoi(value);
+        else if (!strcmp(key, "fade_speed"))
+            s->fade_speed = atoi(value);
         else if (!strcmp(key, "seek_step"))
             s->seek_step = atoi(value);
         else if (!strcmp(key, "setup_done"))
             s->setup_done = atoi(value) != 0;
         else if (!strcmp(key, "shuffle"))
             s->shuffle = atoi(value) != 0;
+        else if (!strcmp(key, "sleep_minutes"))
+            s->sleep_minutes = atoi(value);
+        else if (!strcmp(key, "audio_fade"))
+            s->audio_fade = atoi(value);
+        else if (!strcmp(key, "carousel_mode"))
+            s->carousel_mode = atoi(value);
         else if (!strcmp(key, "repeat") && sscanf(value, "%d", (int *)&parsed) == 1)
             s->repeat = (int)parsed;
         else if (!strcmp(key, "last_dir") &&
@@ -150,8 +164,12 @@ void settings_load(Settings *s)
     if (s->volume < 0) s->volume = 0;
     if (s->volume > 100) s->volume = 100;
     if (s->repeat < 0 || s->repeat > 2) s->repeat = 1;
+    { const int opts[] = {5,10,15,30,45,60}; bool ok = false; for (int i=0;i<6;i++) if (s->sleep_minutes == opts[i]) ok = true; if (!ok) s->sleep_minutes = 15; }
+    if (s->audio_fade < 0 || s->audio_fade > 2) s->audio_fade = 1;
+    if (s->carousel_mode < 0 || s->carousel_mode > 2) s->carousel_mode = 0;
     if (s->clock_mode < 0 || s->clock_mode > 2) s->clock_mode = 0;
     if (s->glow < 0 || s->glow >= GLOW_COUNT) s->glow = 2;
+    if (s->fade_speed < 0 || s->fade_speed >= FADE_COUNT) s->fade_speed = 1;
     {
         bool ok = false;
         for (int i = 0; i < SEEK_STEP_COUNT; i++) if (s->seek_step == SEEK_STEPS[i]) ok = true;
@@ -187,9 +205,13 @@ bool settings_save(const Settings *s)
     fprintf(f, "clock_mode=%d\n", s->clock_mode);
     fprintf(f, "show_batt=%d\n", s->show_batt ? 1 : 0);
     fprintf(f, "glow=%d\n", s->glow);
+    fprintf(f, "fade_speed=%d\n", s->fade_speed);
     fprintf(f, "seek_step=%d\n", s->seek_step);
     fprintf(f, "setup_done=%d\n", s->setup_done ? 1 : 0);
     fprintf(f, "shuffle=%d\n", s->shuffle ? 1 : 0);
+    fprintf(f, "sleep_minutes=%d\n", s->sleep_minutes);
+    fprintf(f, "audio_fade=%d\n", s->audio_fade);
+    fprintf(f, "carousel_mode=%d\n", s->carousel_mode);
     fprintf(f, "repeat=%d\n", s->repeat);
     fprintf(f, "last_dir=%s\n", s->last_dir);
     fclose(f);

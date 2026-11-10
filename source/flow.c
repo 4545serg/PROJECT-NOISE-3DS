@@ -362,7 +362,7 @@ static void draw_item(const FlowItem *it, float o, float appear, FlowBgFn bgf)
         sub.height = (u16)rh;
         sub.top = 0.0f; sub.bottom = refl;
         p.pos.y = CY + h / 2 + 1; p.pos.h = rh; p.depth = z - 0.02f;
-        float top_b = clampf(0.74f + dim, 0.0f, 1.0f), bot_b = 1.0f;
+        float top_b = clampf(0.74f + dim + unfaded, 0.0f, 1.0f), bot_b = 1.0f;
         u32 next_top = (i + 1 < n) ? bgf(x1, ry0) : bgf(xr, ry0);
         u32 next_bot = (i + 1 < n) ? bgf(x1, ry1) : bgf(xr, ry1);
         C2D_SetImageTint(&tint, C2D_TopLeft,  bg_top,   top_b);
@@ -381,7 +381,7 @@ void flow_draw(const FlowItem *items, int n, int base, float pos, float appear, 
     float best = 1e9f;
     for (int i = 0; i < n; i++) {
         float o = (float)(base + i) - pos;
-        if (items[i].kind && fabsf(o) < best) { best = fabsf(o); centre = i; }
+        if (fabsf(o) < best) { best = fabsf(o); centre = i; }
     }
     for (int i = 0; i < n; i++) {
         if (!items[i].kind) continue;

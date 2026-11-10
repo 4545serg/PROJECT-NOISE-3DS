@@ -20,9 +20,13 @@ typedef struct {
     int  clock_mode;                 /* top-screen clock: 0 = off, 1 = 12-hour, 2 = 24-hour */
     bool show_batt;                  /* top-screen battery percentage */
     int  glow;                       /* ambient glow around the cover: 0 = off, 1 = soft, 2 = vivid */
+    int  fade_speed;                 /* cover / glow fade-in: 0 = quick, 1 = smooth, 2 = slow */
     int  seek_step;                  /* D-pad Left/Right skip length in seconds (5 / 10 / 15 / 30) */
     bool setup_done;                 /* first-run setup + guide has been completed */
     bool shuffle;
+    int  sleep_minutes;              /* sleep timer selection: 5, 10, 15, 30, 45 or 60 */
+    int  audio_fade;                 /* track fade: 0 off, 1 short, 2 gentle */
+    int  carousel_mode;              /* 0 carousel, 1 visualizer, 2 both */
     int  repeat;                     /* 0 = off, 1 = all, 2 = one         */
     char last_dir[512];              /* last browsed folder               */
 } Settings;
@@ -32,6 +36,9 @@ extern const char *PRESET_NAMES[PRESET_COUNT];
 
 #define GLOW_COUNT 3
 extern const char *GLOW_NAMES[GLOW_COUNT];
+#define FADE_COUNT 3
+extern const char *FADE_NAMES[FADE_COUNT];
+extern const float FADE_SECS[FADE_COUNT];
 #define SEEK_STEP_COUNT 4
 extern const int SEEK_STEPS[SEEK_STEP_COUNT];
 
