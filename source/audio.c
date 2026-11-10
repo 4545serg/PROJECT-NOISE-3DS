@@ -126,6 +126,7 @@ static void apply_volume(int v)
 
 static bool decode_mp3(s16 *dst, int *frames, int *hz)
 {
+    if (!fp) return false;
     for (;;) {
         if (!in_eof && inlen - inoff < REFILL_BELOW) {
             if (inoff) {
@@ -166,6 +167,7 @@ static bool decode_mp3(s16 *dst, int *frames, int *hz)
 
 static bool decode_wav(s16 *dst, int *frames, int *hz)
 {
+    if (!fp) return false;
     u32 want = FRAME_SAMPLES * (u32)wav.align;
     if (want > wav_left) want = wav_left - wav_left % wav.align;
     if (!want) return false;

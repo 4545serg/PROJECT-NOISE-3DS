@@ -17,17 +17,22 @@ in `SD:/3ds/PROJECT_NOISE/covers/` so they appear instantly next time - delete t
 and leaves the now-playing view (art, title, artist, progress bar, times); scroll the list
 again and the covers fan back out. Songs without art show the animated logo cover.
 
+The background around the cover carries an **ambient glow** taken from the artwork's dominant colour: it follows
+the cover in the middle of the screen (the focused song while you browse, the playing song once you pick one) and
+fades smoothly between covers. Folders and covers without art glow in your accent colour. Turn it off or choose
+*Soft* / *Vivid* in Settings > Look > *Ambient glow*.
+
 **Bottom screen:** folder + music browser (starts in `SD:/Music/`) with a **search bar** in the header, the playing
 song is highlighted, touch controls: shuffle / previous / play-pause / next / repeat / menu (shuffle and repeat sit on
 either side of the transport buttons and light up, with a dot underneath, when on; repeat-one shows a small "1").
 
 | Control | Action |
 |---|---|
-| **L / R** | Skip 5 seconds back / forward (past the end of a song = next track) |
+| **L / R** | Previous / next song (previous restarts the song if more than 3 s have played); the list highlight follows the playing song |
+| **D-pad Left/Right** | Skip back / forward 5 seconds (hold to keep skipping; past the end of a song = next track). The length is adjustable in Settings > General > *Skip length*. In settings: adjust the value |
 | **A** | Play the selected song (opens the selected folder, or `..` to go up; resumes if paused) |
 | **B** | Pause |
 | **D-pad Up/Down** | Move through the list (hold to scroll fast) |
-| **D-pad Left/Right** | Page up/down in the list; in settings: adjust the value |
 | **SELECT** | Open / close settings |
 | **START** | Exit (asks "Exit PROJECT NOISE?" first; press START again or A on *Exit* to leave) |
 | **X** | Search (opens the on-screen keyboard) |
@@ -50,23 +55,27 @@ folder once ("Searching..." for a moment on big libraries); after that, searches
 It searches names, not ID3 tags - name your files `Artist - Title.mp3` (or keep them in Artist/Album folders) for best results.
 
 **Settings (SELECT or the menu button):** three tabs.
-- **Look** - a theme preset (Noise, Emerald, Ocean, Sunset, Mono) and an accent colour swatch.
+- **Look** - a theme preset (Noise, Emerald, Ocean, Sunset, Mono), an accent colour swatch and the **Ambient glow**
+  (Off / Soft / Vivid).
 - **Sound** - volume, a **Manual EQ** switch and a **5-band equalizer** shown as five **vertical sliders** (60 Hz, 230 Hz,
   910 Hz, 3.6 kHz, 14 kHz, -12..+12 dB, with the gain above each slider) and presets (Flat, Bass Boost, Treble, Vocal, Rock, Pop).
   Manual EQ **off**: the chosen preset plays and the sliders show its curve (greyed, locked; touching one reminds you to turn Manual EQ on).
   Manual EQ **on**: your own slider settings play (the preset selector reads "User"). Your manual curve is
   remembered while you switch back and forth. Drag a slider up / down with the stylus or a finger; with the D-pad,
   Left/Right picks the band, Up/Down changes its gain, and A (or Left / Right past the first / last band) leaves the sliders.
-- **General** - **Clock** (off / 12-hour / 24-hour) and **Battery percentage**, shown in the top-screen corners;
-  **Show setup guide** (replays the first-run guide); **Play with lid closed** (keeps the 3DS awake so music continues when you close it;
-  uses more battery) and **Exit app** (asks for confirmation).
+- **General** - **Skip length** (what D-pad Left/Right skip: 5 / 10 / 15 / 30 seconds), **Clock** (off / 12-hour / 24-hour)
+  and **Battery percentage**, shown in the top-screen corners; **Play with lid closed** (keeps the 3DS awake so music
+  continues when you close it; uses more battery); **Show setup guide** (replays the first-run guide) and
+  **Exit app** (asks for confirmation).
 
 Everything saves automatically to `SD:/3ds/PROJECT_NOISE/settings.cfg`, along with
 shuffle, repeat, EQ, lid setting and the last folder, and is restored on next launch.
 
-**First launch:** a short setup and guide runs once (welcome + sound/music-folder check, Look, Sound,
-Extras for clock / battery / lid, Controls, Done). Use the touch buttons or A = Next, B = Back; *Skip* leaves it early.
-Replay it any time from Settings > General > *Show setup guide*.
+**First launch:** a three-step setup runs once - (1) welcome + a check that sound and the music folder are ready,
+(2) **Make it yours**: theme, accent, ambient glow, clock and battery on a single page, with the top screen showing
+the result live, (3) the controls cheat-sheet. Use the touch buttons or A = Next, B = Back; *Skip* leaves it early.
+Everything else (volume, equalizer, skip length, lid) lives in Settings. Replay the setup any time from
+Settings > General > *Show setup guide*.
 
 ## 2. Putting music on the SD card
 
@@ -85,7 +94,7 @@ Tips
   on Old 3DS, pictures above ~1.2 megapixels (about 1100x1100) are skipped and the
   placeholder is shown - re-embed a 500-600 px cover for best results. Baseline (non-progressive)
   JPEGs load fastest. Loading a cover can pause the UI for a moment (audio keeps playing).
-- Skipping with L / R is exact for FLAC and WAV; for MP3 it is estimated from file position, so VBR files can land
+- Skipping with D-pad Left / Right is exact for FLAC and WAV; for MP3 it is estimated from file position, so VBR files can land
   a little off.
 - Duration uses the Xing/VBRI header when present, otherwise a bitrate estimate, so it can
   be slightly off for some VBR files without a header.
@@ -143,11 +152,11 @@ with another title you have installed.
 ## 6. Source layout
 
 ```
-source/main.c      UI, input, playlist logic, settings page (incl. vertical EQ), search UI, first-run setup, clock/battery
+source/main.c      UI, input, playlist logic, ambient glow, settings page (incl. vertical EQ), search UI, first-run setup, clock/battery
 source/search.c    song search: one-time index of SD:/Music/ (recursive) + in-memory filter
 source/audio.c     minimp3 / dr_flac / WAV decode thread -> ndsp channel 0, position tracking
 source/meta.c      ID3v2/v1 parsing, artwork extraction, duration probe
-source/art.c       JPEG/PNG -> 128x128 tiled GPU texture (decode + upload split)
+source/art.c       JPEG/PNG -> 128x128 tiled GPU texture (decode + upload split) + dominant-colour extraction for the glow
 source/flow.c      Cover Flow: perspective drawing, background cover loader, SD thumbnail cache
 source/browser.c   folder listing / sorting
 source/settings.c  theme + preferences, autosave file

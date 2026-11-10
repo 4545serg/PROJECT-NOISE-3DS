@@ -49,11 +49,32 @@
 #define EQ_TRK_Y1  195         /* ... -12 dB at the bottom           */
 
 enum {                         /* settings rows, grouped in three pages */
-    ROW_PRESET, ROW_ACCENT,                                        /* Look    */
+    ROW_PRESET, ROW_ACCENT, ROW_GLOW,                                          /* Look    */
     ROW_VOL, ROW_EQMAN, ROW_EQPRE, ROW_B0, ROW_B1, ROW_B2, ROW_B3, ROW_B4,    /* Sound   */
-    ROW_LID, ROW_CLOCK, ROW_BATT, ROW_GUIDE, ROW_EXIT,             /* General */
+    ROW_SEEK, ROW_CLOCK, ROW_BATT, ROW_LID, ROW_GUIDE, ROW_EXIT,              /* General */
     SET_ROWS
 };
+
+/* "Cards" are lists of settings rows drawn as one inset panel. Cards 0 and 2 are the Look and General
+ * tabs (the Sound tab has its own layout); CARD_SETUP is the single combined page of the first-run setup. */
+enum { CARD_LOOK, CARD_SOUND, CARD_GENERAL, CARD_SETUP, CARD_COUNT };
+static const int   ROWS_LOOK[]    = { ROW_PRESET, ROW_ACCENT, ROW_GLOW };
+static const int   ROWS_GENERAL[] = { ROW_SEEK, ROW_CLOCK, ROW_BATT, ROW_LID, ROW_GUIDE, ROW_EXIT };
+static const int   ROWS_SETUP[]   = { ROW_PRESET, ROW_ACCENT, ROW_GLOW, ROW_CLOCK, ROW_BATT };
+static const int  *CARD_ROWS[CARD_COUNT] = { ROWS_LOOK, NULL, ROWS_GENERAL, ROWS_SETUP };
+static const int   CARD_LEN[CARD_COUNT]  = { 3, 0, 6, 5 };
+static const float CARD_ROWH[CARD_COUNT] = { 46.0f, 0.0f, 26.0f, 25.0f };
+static const int   TAB_FIRST[3]          = { ROW_PRESET, ROW_VOL, ROW_SEEK };
+static const char *PAGE_NAMES[3]         = { "Look", "Sound", "General" };
+
+#define TOP_W   400            /* screen sizes in pixels */
+#define BOT_W   320
+#define SCR_H   240
+
+/* ambient glow: how strongly the cover colour tints the top screen, and how far it reaches */
+static const float GLOW_STRENGTH[GLOW_COUNT] = { 0.0f, 0.30f, 0.50f };
+#define GLOW_CORE   50.0f      /* half-size of the fully-lit core around the centre cover */
+#define GLOW_REACH  150.0f     /* distance from that core at which the glow has faded out */
 
 /* ----------------------------------------------------------------- state */
 static Settings  S;
@@ -90,17 +111,21 @@ static u64       flow_prev_ms = 0;
 static bool      flow_want_dirty = true;      /* load queue needs rebuilding */
 static bool      flow_show_prev = true;
 
+/* ambient glow behind the cover (top screen): current colour + strength, eased toward the target */
+static float     amb_r = 61.0f, amb_g = 156.0f, amb_b = 255.0f, amb_k = 0.0f;
+static bool      amb_init = false;
+
 /* exit confirmation dialog (START or Settings > Exit app) */
 static bool      confirm_exit = false;
 static int       confirm_sel = 0;             /* 0 = Cancel, 1 = Exit */
 static int       dirty_timer = 0;
 
 /* first-run setup + guide */
-#define WZ_N 6
+enum { WZ_WELCOME, WZ_SETUP, WZ_DONE, WZ_N };                      /* welcome + checks, make it yours, controls */
 static bool      wizard_open = false;
 static int       wz_page = 0;
-static const int WZ_CARD[WZ_N] = { -1, 0, 3, 4, -1, -1 };       /* settings card shown on each step */
-static const char *WZ_TITLE[WZ_N] = { "Welcome", "Look", "Sound", "Extras", "Controls", "All set" };
+static const int WZ_CARD[WZ_N] = { -1, CARD_SETUP, -1 };           /* settings card shown on each step */
+static const char *WZ_TITLE[WZ_N] = { "Welcome", "Make it yours", "Controls" };
 
 /* top-screen clock / battery, and the on-screen "+5s" toast */
 static bool      mcu_ok = false, ptm_ok = false;
@@ -108,6 +133,9 @@ static int       batt_pct = -1, batt_timer = 0;
 static bool      batt_chg = false;
 static char      toast_msg[24];
 static int       toast_t = 0;
+static int       ctrl_flash_t = 0;  /* press highlight on a transport button: frames left + its x */
+static float     ctrl_flash_x = 0.0f;
+#define CTRL_FLASH_FRAMES 10
 
 static void      toast(const char *msg);
 
@@ -135,13 +163,62 @@ static Rgb mix_rgb(Rgb a, Rgb b, int w)    /* w = 0..255 weight of b */
 static Rgb bg_at(float y)                         /* background colour at screen row y (0..240) */
 {
     Rgb lit = mix_rgb(S.bg, S.text, 14);
-    return mix_rgb(lit, S.bg, (int)(255.0f * y / 240.0f));
+    return mix_rgb(lit, S.bg, (int)(255.0f * y / (float)SCR_H));
 }
 
 static void bg_gradient(float w)
 {
-    u32 t = C(bg_at(0)), b = C(bg_at(240));
-    C2D_DrawRectangle(0, 0, 0.05f, w, 240, t, t, b, b);
+    u32 t = C(bg_at(0)), b = C(bg_at((float)SCR_H));
+    C2D_DrawRectangle(0, 0, 0.05f, w, (float)SCR_H, t, t, b, b);
+}
+
+/* Ambient glow: the top-screen background, tinted with the cover's colour. The tint is strongest right
+ * around the centre cover and fades smoothly to the plain background, so it never forms a visible box. */
+static float glow_at(float x, float y)                 /* 0..1 */
+{
+    float dx = fabsf(x - 200.0f) - GLOW_CORE, dy = fabsf(y - 94.0f) - GLOW_CORE;
+    if (dx < 0.0f) dx = 0.0f;
+    if (dy < 0.0f) dy = 0.0f;
+    float t = 1.0f - sqrtf(dx * dx + dy * dy) / GLOW_REACH;
+    return t > 0.0f ? t * t : 0.0f;
+}
+
+static u32 top_bg_color(float x, float y)              /* also handed to the cover flow (FlowBgFn) */
+{
+    Rgb base = bg_at(y);
+    float k = amb_k * glow_at(x, y);
+    if (k < 0.004f) return C(base);
+    Rgb amb = { (u8)amb_r, (u8)amb_g, (u8)amb_b };
+    return C(mix_rgb(base, amb, (int)(k * 255.0f)));
+}
+
+/* The glow is a grid of gouraud-shaded cells. Vertex colours only depend on the glow colour, its strength and
+ * the theme, so they are cached and rebuilt only while the colour is actually easing toward a new cover. */
+#define GLOW_COLS    (TOP_W / 20)
+#define GLOW_BANDS   7
+static const float GLOW_YS[GLOW_BANDS + 1] = { 0, 22, 58, 94, 130, 166, 200, SCR_H };
+
+static void top_background(void)
+{
+    if (amb_k < 0.004f) { bg_gradient(TOP_W); return; }        /* glow off: the plain gradient */
+
+    static u32 mesh[(GLOW_BANDS + 1) * (GLOW_COLS + 1)];
+    static u8  key[10];
+    const u8 now[10] = { (u8)amb_r, (u8)amb_g, (u8)amb_b, (u8)(amb_k * 255.0f),
+                         S.bg.r, S.bg.g, S.bg.b, S.text.r, S.text.g, S.text.b };
+    if (memcmp(key, now, sizeof key) != 0) {
+        memcpy(key, now, sizeof key);
+        for (int yi = 0; yi <= GLOW_BANDS; yi++)
+            for (int xi = 0; xi <= GLOW_COLS; xi++)
+                mesh[yi * (GLOW_COLS + 1) + xi] = top_bg_color((float)xi * 20.0f, GLOW_YS[yi]);
+    }
+    for (int yi = 0; yi < GLOW_BANDS; yi++) {
+        for (int xi = 0; xi < GLOW_COLS; xi++) {
+            const u32 *a = &mesh[yi * (GLOW_COLS + 1) + xi], *b = a + (GLOW_COLS + 1);
+            C2D_DrawRectangle((float)xi * 20.0f, GLOW_YS[yi], 0.05f, 20.0f, GLOW_YS[yi + 1] - GLOW_YS[yi],
+                              a[0], a[1], b[0], b[1]);
+        }
+    }
 }
 
 static void mark_dirty(void) { settings_dirty = true; dirty_timer = 60; }
@@ -214,9 +291,8 @@ static void play_q(int idx)
 static bool is_current_row(int row)       /* full-path compare: works for folders and search results */
 {
     if (cur_path[0] == 0 || row < 0 || row >= L.n || L.e[row].is_dir) return false;
-    char p[800];
-    snprintf(p, sizeof p, "%s%s", L.dir, L.e[row].name);
-    return strcmp(p, cur_path) == 0;
+    size_t dl = strlen(L.dir);                                    /* cur_path == dir + name, compared in place */
+    return strncmp(cur_path, L.dir, dl) == 0 && strcmp(cur_path + dl, L.e[row].name) == 0;
 }
 
 /* file name part of an entry name (search results carry a path relative to the Music folder) */
@@ -281,6 +357,13 @@ static void prev_track(void)
     play_q(n);
 }
 
+/* Skipping by hand (L / R, on-screen buttons) shows what is playing now instead of the browse view. */
+static void follow_playing(void);
+
+static void flash_ctrl(float x) { ctrl_flash_x = x; ctrl_flash_t = CTRL_FLASH_FRAMES; }
+static void skip_next(void) { if (Q.n == 0) return; flash_ctrl(208); flow_show = false; next_track(true); follow_playing(); }
+static void skip_prev(void) { if (Q.n == 0) return; flash_ctrl(112); flow_show = false; prev_track(); follow_playing(); }
+
 static void toggle_play(void)
 {
     if (audio_is_active()) {
@@ -299,6 +382,23 @@ static void clamp_scroll(void)
     if (max_top < 0) max_top = 0;
     if (scroll_top > max_top) scroll_top = max_top;
     if (scroll_top < 0) scroll_top = 0;
+}
+
+/* Highlight the playing song in the list it was started from, so the list and the top screen agree after a skip.
+ * Does nothing while the cover flow is open (you are browsing) or when the song came from another list. */
+static void follow_playing(void)
+{
+    if (flow_show || qi < 0 || qi >= Q.n) return;
+    if (L_is_search != Q_is_search || strcmp(Q.dir, L.dir) != 0) return;
+    for (int i = 0; i < L.n; i++) {
+        if (L.e[i].is_dir || strcmp(L.e[i].name, Q.e[qi].name) != 0) continue;
+        if (i != sel) {
+            sel = i;
+            scroll_top = i - VIS_ROWS / 2;
+            clamp_scroll();
+        }
+        return;
+    }
 }
 
 static void set_dir(const char *path, const char *select_name)
@@ -432,22 +532,25 @@ static Rgb hex_rgb(u32 v) { Rgb c = { (u8)(v >> 16), (u8)(v >> 8), (u8)v }; retu
 
 static int accent_index(void)
 {
-    u32 cur = ((u32)S.accent.r << 16) | ((u32)S.accent.g << 8) | S.accent.b;
+    u32 rgb = ((u32)S.accent.r << 16) | ((u32)S.accent.g << 8) | S.accent.b;
     for (int i = 0; i < ACCENT_N; i++)
-        if (ACCENTS[i] == cur) return i;
+        if (ACCENTS[i] == rgb) return i;
     return -1;
 }
 
 static bool is_slider_row(int r) { return r == ROW_VOL || (r >= ROW_B0 && r <= ROW_B4); }
-static int  row_page(int r)      { return r < ROW_VOL ? 0 : (r < ROW_LID ? 1 : 2); }
+static int  row_page(int r)      { return r < ROW_VOL ? 0 : (r < ROW_SEEK ? 1 : 2); }
 
-/* pages 0-2 are the Settings tabs; 3 and 4 are shorter versions used only by the first-run setup */
-static const int   PAGE_FIRST[5] = { ROW_PRESET, ROW_VOL, ROW_LID, ROW_VOL, ROW_LID };
-static const int   PAGE_COUNT[5] = { 2, 8, 5, 3, 3 };
-static const float PAGE_ROWH[5]  = { 46.0f, 19.5f, 31.0f, 40.0f, 40.0f };
-static const char *PAGE_NAMES[3] = { "Look", "Sound", "General" };
 static bool is_switch_row(int r) { return r == ROW_LID || r == ROW_BATT || r == ROW_EQMAN; }
 static bool is_band_row(int r)   { return r >= ROW_B0 && r <= ROW_B4; }
+static bool is_choice_row(int r) { return r == ROW_PRESET || r == ROW_EQPRE || r == ROW_CLOCK || r == ROW_GLOW || r == ROW_SEEK; }
+
+static int card_pos(int card, int row)            /* index of `row` inside a card, or -1 */
+{
+    for (int i = 0; i < CARD_LEN[card]; i++)
+        if (CARD_ROWS[card][i] == row) return i;
+    return -1;
+}
 
 static void eq_push(void) { audio_set_eq(S.eq); }
 static void apply_lid(void) { aptSetSleepAllowed(!S.lid_play); }   /* closing the lid no longer sleeps the 3DS */
@@ -499,6 +602,12 @@ static void set_adjust(int dir)
         apply_lid();
     } else if (set_row == ROW_CLOCK) {
         S.clock_mode = (S.clock_mode + dir + 3) % 3;
+    } else if (set_row == ROW_GLOW) {
+        S.glow = (S.glow + dir + GLOW_COUNT) % GLOW_COUNT;
+    } else if (set_row == ROW_SEEK) {
+        int i = 0;
+        for (int k = 0; k < SEEK_STEP_COUNT; k++) if (SEEK_STEPS[k] == S.seek_step) i = k;
+        S.seek_step = SEEK_STEPS[(i + dir + SEEK_STEP_COUNT) % SEEK_STEP_COUNT];
     } else if (set_row == ROW_BATT) {
         S.show_batt = !S.show_batt;
         batt_timer = 0;                       /* read the battery right away */
@@ -537,7 +646,7 @@ static int row_step(int r, int dir)
 {
     int n = r + dir;
     if (n < 0 || n >= SET_ROWS) return r;
-    if (is_band_row(n) && !S.eq_manual) n = (dir > 0) ? ROW_LID : ROW_EQPRE;
+    if (is_band_row(n) && !S.eq_manual) n = (dir > 0) ? ROW_SEEK : ROW_EQPRE;
     return n;
 }
 
@@ -560,6 +669,18 @@ static bool repeat_fire(u32 held, u32 key, int *cnt)
     return false;
 }
 
+/* hold-to-repeat for seeking: first press at once, then ~6 skips a second after a short hold */
+static bool repeat_seek(u32 held, u32 key, int *cnt)
+{
+    if (held & key) {
+        (*cnt)++;
+        if (*cnt == 1) return true;
+        return (*cnt > 24) && (((*cnt - 24) % 10) == 0);
+    }
+    *cnt = 0;
+    return false;
+}
+
 /* ------------------------------------------------------------- cover flow */
 static void flow_refresh_wants(void)   /* queue the missing covers around the focus, nearest first */
 {
@@ -577,6 +698,36 @@ static void flow_refresh_wants(void)   /* queue the missing covers around the fo
         n++;
     }
     flow_want(w, n);
+}
+
+/* The glow follows the cover in the middle of the top screen: the focused entry while browsing, the
+ * playing track once a song has been picked. Folders / covers without art use the theme accent. */
+static void ambient_update(float dt)
+{
+    u32 rgb = 0;
+    bool have = false;
+    if (flow_appear > 0.5f && L.n > 0) {
+        int fi = (int)floorf(flow_pos + 0.5f);
+        if (fi < 0) fi = 0;
+        if (fi >= L.n) fi = L.n - 1;
+        if (!L.e[fi].is_dir) {
+            if (is_current_row(fi) && art_ready()) have = art_color(&rgb);
+            else have = flow_color(fi, &rgb);
+        }
+    } else if (track_loaded) {
+        have = art_color(&rgb);
+    }
+    if (!have) rgb = ((u32)S.accent.r << 16) | ((u32)S.accent.g << 8) | S.accent.b;
+
+    float tr = (float)((rgb >> 16) & 0xFF), tg = (float)((rgb >> 8) & 0xFF), tb = (float)(rgb & 0xFF);
+    float tk = GLOW_STRENGTH[S.glow];
+    if (!amb_init) { amb_r = tr; amb_g = tg; amb_b = tb; amb_k = tk; amb_init = true; return; }
+
+    float a = 1.0f - expf(-dt * 7.0f);                   /* ~150 ms to settle on a new cover */
+    amb_r += (tr - amb_r) * a;
+    amb_g += (tg - amb_g) * a;
+    amb_b += (tb - amb_b) * a;
+    amb_k += (tk - amb_k) * a;
 }
 
 static void flow_update(void)          /* once per frame: animation + selection tracking */
@@ -610,6 +761,8 @@ static void flow_update(void)          /* once per frame: animation + selection 
 
     /* title/artist for the settled entry: one small file read, never while scrolling */
     if (flow_idle > 6 && sel >= 0 && sel < L.n && !L.e[sel].meta_loaded && !L.e[sel].is_dir) ensure_meta(&L.e[sel]);
+
+    ambient_update(dt);
 }
 
 /* ---------------------------------------------------------------- drawing */
@@ -707,14 +860,10 @@ static void draw_top(void)
     u32 cText = C(S.text), cAcc = C(S.accent), cSel = C(S.select);
     u32 cDim = C(mix_rgb(S.text, S.bg, 120));
 
-    /* cover, centered: soft accent glow, drop shadow, hairline frame */
+    /* cover, centered. The background around it carries the ambient glow (cover colours); there is no
+     * frame / backing plate, so nothing grey shows through while the covers slide past. */
     const float asz = 144, ax = 128, ay = 22;                          /* matches FACE / CY in flow.c */
-    Rgb black = { 0, 0, 0 }, bgc = bg_at(ay + asz / 2);
-    for (int k = 3; k >= 1; k--)
-        rrect(ax - 3 - k * 5, ay - 3 - k * 5 + 3, asz + 6 + k * 10, asz + 6 + k * 10, 8 + k * 5,
-              0.12f + (3 - k) * 0.02f, C(mix_rgb(bgc, S.accent, 9 * (4 - k))));
-    rrect(ax - 2, ay + 5, asz + 4, asz + 4, 8, 0.24f, C(mix_rgb(bgc, black, 170)));
-    rrect(ax - 2, ay - 2, asz + 4, asz + 4, 7, 0.28f, C(mix_rgb(S.select, S.text, 45)));
+    top_background();
 
     bool use_flow = flow_appear > 0.01f && L.n > 0;
     if (use_flow) {
@@ -730,12 +879,12 @@ static void draw_top(void)
                 items[i].color = C(mix_rgb(S.select, S.text, 60));
             } else {
                 items[i].kind = 2;
-                items[i].color = C(tile_color(e->name));
+                items[i].color = C(mix_rgb(bg_at(94), tile_color(e->name), 90));   /* subdued: the cover fades in from it */
                 items[i].fade = 1.0f;
                 items[i].tex = (is_current_row(idx) && art_ready()) ? art_image()->tex : flow_tex(idx, &items[i].fade);
             }
         }
-        flow_draw(items, 10, base, flow_pos, flow_appear, C(bg_at(180)));
+        flow_draw(items, 10, base, flow_pos, flow_appear, top_bg_color);
     } else if (art_ready()) {
         C2D_DrawImageAt(*art_image(), ax, ay, 0.40f, NULL, asz / 128.0f, asz / 128.0f);
     } else {
@@ -846,6 +995,10 @@ static void draw_miniplayer(void)
     /* transport buttons */
     const float cy = y + 37;
     bool playing = audio_is_active() && !audio_is_paused();
+    if (ctrl_flash_t > 0) {                           /* press feedback: a disc that eases back into the panel colour */
+        Rgb panel = mix_rgb(S.bg, S.select, 140);
+        C2D_DrawCircleSolid(ctrl_flash_x, cy, 0.37f, 19, C(mix_rgb(panel, S.accent, 80 * ctrl_flash_t / CTRL_FLASH_FRAMES)));
+    }
     icon_prev(112, cy, 8, cText);
     C2D_DrawCircleSolid(160, cy, 0.38f, 17, playing ? C(mix_rgb(S.bg, S.accent, 110)) : cSel);   /* status ring */
     C2D_DrawCircleSolid(160, cy, 0.40f, 14, cText);
@@ -864,7 +1017,6 @@ static void draw_miniplayer(void)
     }
 }
 
-static int loads_this_frame = 0;
 
 static void draw_browser(void)
 {
@@ -913,7 +1065,7 @@ static void draw_browser(void)
         draw_text("Searches file and folder names in SD:/Music/", 160, 130, 0.4f, cDim, C2D_AlignCenter, 300);
     }
 
-    loads_this_frame = 0;
+    int loads_this_frame = 0;                          /* at most one tag read per frame while browsing */
     for (int i = 0; i < VIS_ROWS; i++) {
         int idx = scroll_top + i;
         if (idx >= L.n) break;
@@ -1016,22 +1168,23 @@ static void switch_sm(float x, float cy, bool on, u32 cOn, u32 cOff, u32 cKnob) 
     C2D_DrawCircleSolid(on ? x + 22.5f : x + 7.5f, cy, 0.42f, 5.5f, cKnob);
 }
 
-static void draw_card(int page)
+static void draw_card(int card)
 {
     u32 cText = C(S.text), cAcc = C(S.accent), cSel = C(S.select);
     u32 cDim = C(mix_rgb(S.text, S.bg, 120));
     u32 cCard = C(mix_rgb(S.bg, S.select, 150));
     u32 cHi = C(mix_rgb(S.select, S.accent, 60));
-    u32 cHalo = C(mix_rgb(S.select, S.accent, 110));
     u32 cDanger = C2D_Color32(255, 90, 95, 255);
 
-    const int first = PAGE_FIRST[page], n = PAGE_COUNT[page];
-    const float rh = PAGE_ROWH[page], top = 62;
+    const int *rows = CARD_ROWS[card];
+    const int n = CARD_LEN[card];
+    const float rh = CARD_ROWH[card], top = 62;
+    const bool tight = rh < 30.0f;                 /* compact rows: one-line labels, small switches */
     rrect(6, top, 308, n * rh, 10, 0.26f, cCard);
     C2D_DrawRectSolid(16, top, 0.27f, 288, 1, C(mix_rgb(S.bg, S.text, 30)));          /* lit top edge */
 
     for (int i = 0; i < n; i++) {
-        int r = first + i;
+        int r = rows[i];
         float y = top + i * rh, cy = y + rh / 2;
         bool on = (r == set_row);
         char buf[64];
@@ -1039,7 +1192,7 @@ static void draw_card(int page)
         if (on) {
             rrect(8, y + 1, 304, rh - 2, 8, 0.28f, cHi);
             rrect(9, y + rh / 2 - 7, 3, 14, 1.5f, 0.32f, cAcc);        /* nav-indicator bar */
-        } else if (i > 0 && (r - 1) != set_row) {
+        } else if (i > 0 && rows[i - 1] != set_row) {
             C2D_DrawRectSolid(18, y, 0.29f, 284, 1, cSel);
         }
 
@@ -1057,57 +1210,42 @@ static void draw_card(int page)
         } else if (r == ROW_ACCENT) {
             row_text("Accent", 18, y, rh, 0.5f, cText, C2D_AlignLeft, 50);
             int ai = accent_index();
+            const float sr = tight ? 7.5f : 9.5f;                              /* swatch radius */
             for (int k = 0; k < ACCENT_N; k++) {
                 float sx = PAL_X0 + PAL_STEP * k + PAL_STEP / 2.0f;
                 if (k == ai) {
-                    C2D_DrawCircleSolid(sx, cy, 0.38f, 12.5f, cText);
-                    C2D_DrawCircleSolid(sx, cy, 0.39f, 10.5f, on ? cHi : cCard);
+                    C2D_DrawCircleSolid(sx, cy, 0.38f, sr + 3.0f, cText);
+                    C2D_DrawCircleSolid(sx, cy, 0.39f, sr + 1.0f, on ? cHi : cCard);
                 }
-                C2D_DrawCircleSolid(sx, cy, 0.40f, (k == ai) ? 8.5f : 9.5f, C(hex_rgb(ACCENTS[k])));
+                C2D_DrawCircleSolid(sx, cy, 0.40f, (k == ai) ? sr - 1.0f : sr, C(hex_rgb(ACCENTS[k])));
             }
-        } else if (r == ROW_EQMAN) {
-            if (rh >= 30.0f) {
+        } else if (r == ROW_GLOW) {
+            if (!tight) {
                 float ty = y + (rh - 30.0f) / 2.0f;
-                draw_text("Manual EQ", 18, ty, 0.5f, cText, C2D_AlignLeft, 230);
-                draw_text(S.eq_manual ? "Using your own band settings" : "Off - using the preset below",
-                          18, ty + 16, 0.34f, cDim, C2D_AlignLeft, 236);
-                switch_ctl(262, cy, S.eq_manual, cAcc, cSel, cText);
+                draw_text("Ambient glow", 18, ty, 0.5f, cText, C2D_AlignLeft, 150);
+                draw_text("Glow from the album art", 18, ty + 16, 0.34f, cDim, C2D_AlignLeft, 150);
             } else {
-                row_text("Manual EQ", 18, y, rh, 0.5f, cText, C2D_AlignLeft, 160);
-                switch_sm(276, cy, S.eq_manual, cAcc, cSel, cText);
+                row_text("Ambient glow", 18, y, rh, 0.5f, cText, C2D_AlignLeft, 150);
             }
-        } else if (r == ROW_EQPRE) {
-            row_text("Equalizer", 18, y, rh, 0.5f, S.eq_manual ? cDim : cText, C2D_AlignLeft, 80);
-            snprintf(buf, sizeof buf, "%s", S.eq_manual ? "User" : EQ_PRESET_NAMES[S.eq_preset]);
-            row_text(buf, 236, y, rh, 0.5f, S.eq_manual ? cDim : cAcc, C2D_AlignCenter, 92);
-            if (!S.eq_manual) {
-                chevron(176, cy, false, cDim);
-                chevron(296, cy, true, cDim);
-            }
-        } else if (is_slider_row(r)) {
-            bool vol = (r == ROW_VOL);
-            static const char *BAND[EQ_BANDS] = { "60 Hz", "230 Hz", "910 Hz", "3.6 kHz", "14 kHz" };
-            float frac, from;
-            if (vol) {
-                frac = S.volume / 100.0f; from = 0.0f;
-                snprintf(buf, sizeof buf, "%d%%", S.volume);
-            } else {
-                int g = S.eq[r - ROW_B0];
-                frac = (g + 12) / 24.0f; from = 0.5f;
-                snprintf(buf, sizeof buf, "%+d dB", g);
-                C2D_DrawRectSolid(SS_X0 + (SS_X1 - SS_X0) * 0.5f - 0.5f, cy - 5, 0.35f, 1, 10, cDim);   /* 0 dB tick */
-            }
-            row_text(vol ? "Volume" : BAND[r - ROW_B0], 18, y, rh, vol ? 0.5f : 0.42f,
-                     (is_band_row(r) && !S.eq_manual) ? cDim : cText, C2D_AlignLeft, 76);
-            bool locked = is_band_row(r) && !S.eq_manual;               /* bands show the preset's curve, read-only */
-            u32 cLock = C(mix_rgb(S.accent, S.bg, 150));
-            m_slider(SS_X0, SS_X1, cy, frac, from, !locked && (on || set_drag == r), cSel, locked ? cLock : cAcc, cHalo);
-            row_text(buf, 306, y, rh, vol ? 0.5f : 0.42f, locked ? cDim : cAcc, C2D_AlignRight, 0);
+            row_text(GLOW_NAMES[S.glow], 236, y, rh, 0.5f, S.glow ? cAcc : cDim, C2D_AlignCenter, 92);
+            chevron(176, cy, false, cDim);
+            chevron(296, cy, true, cDim);
+        } else if (r == ROW_SEEK) {
+            row_text("Skip length", 18, y, rh, 0.5f, cText, C2D_AlignLeft, 100);
+            snprintf(buf, sizeof buf, "%d sec", S.seek_step);
+            row_text(buf, 236, y, rh, 0.5f, cAcc, C2D_AlignCenter, 92);
+            chevron(176, cy, false, cDim);
+            chevron(296, cy, true, cDim);
         } else if (r == ROW_LID) {
-            float ty = y + (rh - 30.0f) / 2.0f;
-            draw_text("Play with lid closed", 18, ty, 0.5f, cText, C2D_AlignLeft, 230);
-            draw_text("Keep music going when you close the 3DS", 18, ty + 16, 0.34f, cDim, C2D_AlignLeft, 236);
-            switch_ctl(262, cy, S.lid_play, cAcc, cSel, cText);
+            if (!tight) {
+                float ty = y + (rh - 30.0f) / 2.0f;
+                draw_text("Play with lid closed", 18, ty, 0.5f, cText, C2D_AlignLeft, 230);
+                draw_text("Keep music going when you close the 3DS", 18, ty + 16, 0.34f, cDim, C2D_AlignLeft, 236);
+                switch_ctl(262, cy, S.lid_play, cAcc, cSel, cText);
+            } else {
+                row_text("Play with lid closed", 18, y, rh, 0.5f, cText, C2D_AlignLeft, 230);
+                switch_sm(276, cy, S.lid_play, cAcc, cSel, cText);
+            }
         } else if (r == ROW_CLOCK) {
             row_text("Clock", 18, y, rh, 0.5f, cText, C2D_AlignLeft, 80);
             static const char *CLK[3] = { "Off", "12-hour", "24-hour" };
@@ -1116,7 +1254,8 @@ static void draw_card(int page)
             chevron(296, cy, true, cDim);
         } else if (r == ROW_BATT) {
             row_text("Battery percentage", 18, y, rh, 0.5f, cText, C2D_AlignLeft, 230);
-            switch_ctl(262, cy, S.show_batt, cAcc, cSel, cText);
+            if (tight) switch_sm(276, cy, S.show_batt, cAcc, cSel, cText);
+            else       switch_ctl(262, cy, S.show_batt, cAcc, cSel, cText);
         } else if (r == ROW_GUIDE) {
             row_text("Show setup guide", 18, y, rh, 0.5f, cText, C2D_AlignLeft, 230);
             chevron(296, cy, true, cDim);
@@ -1196,24 +1335,24 @@ static void draw_sound(void)
     for (int i = 0; i < EQ_BANDS; i++) {
         const int r = ROW_B0 + i;
         const float cx = EQ_COL_X0 + EQ_COL_W * i + EQ_COL_W / 2.0f;
-        bool sel = (set_row == r) && !locked, drag = (set_drag == r);
+        bool focus = (set_row == r) && !locked, drag = (set_drag == r);
         int g = S.eq[i];
         float ky = EQ_TRK_Y1 - (float)(g + 12) / 24.0f * th;       /* knob position */
         u32 cFill = locked ? cLock : cAcc;
 
-        if (sel) rrect(cx - 25, SND_EQ_Y + 1, 50, SND_BOTTOM - SND_EQ_Y - 3, 8, 0.28f, cHi);
+        if (focus) rrect(cx - 25, SND_EQ_Y + 1, 50, SND_BOTTOM - SND_EQ_Y - 3, 8, 0.28f, cHi);
 
         rrect(cx - 2.5f, EQ_TRK_Y0 - 2, 5, th + 4, 2.5f, 0.34f, cSel);              /* track */
         float fa = (ky < mid) ? ky : mid, fb = (ky < mid) ? mid : ky;                 /* fill: 0 dB -> knob */
         if (fb - fa >= 5) rrect(cx - 2.5f, fa, 5, fb - fa, 2.5f, 0.36f, cFill);
         else if (fb - fa > 0.5f) C2D_DrawRectSolid(cx - 2.5f, fa, 0.36f, 5, fb - fa, cFill);
 
-        if (sel || drag) C2D_DrawCircleSolid(cx, ky, 0.40f, 9.5f, cHalo);
+        if (focus || drag) C2D_DrawCircleSolid(cx, ky, 0.40f, 9.5f, cHalo);
         C2D_DrawCircleSolid(cx, ky, 0.42f, 7.5f, cFill);
         if (!locked) C2D_DrawCircleSolid(cx, ky, 0.43f, 3.5f, cText);
 
         if (g == 0) snprintf(buf, sizeof buf, "0"); else snprintf(buf, sizeof buf, "%+d", g);
-        draw_text(buf, cx, 109, 0.38f, locked ? cDim : ((sel || drag) ? cAcc : cText), C2D_AlignCenter, 0);
+        draw_text(buf, cx, 109, 0.38f, locked ? cDim : ((focus || drag) ? cAcc : cText), C2D_AlignCenter, 0);
         draw_text(BAND[i], cx, 204, 0.36f, sel ? cAcc : cDim, C2D_AlignCenter, 0);
     }
 }
@@ -1240,7 +1379,7 @@ static void draw_settings(void)
         draw_sound();
         if (is_band_row(set_row)) hint = "D-pad  Left/Right band    Up/Down gain    A  Back";
     } else {
-        draw_card(page);
+        draw_card(page == 0 ? CARD_LOOK : CARD_GENERAL);
     }
     draw_text(hint, 160, 224, 0.36f, cDim, C2D_AlignCenter, 316);
 }
@@ -1302,7 +1441,7 @@ static void wz_enter(int page)
 {
     wz_page = page;
     set_drag = -1;
-    if (WZ_CARD[page] >= 0) set_row = PAGE_FIRST[WZ_CARD[page]];
+    if (WZ_CARD[page] >= 0) set_row = CARD_ROWS[WZ_CARD[page]][0];
 }
 
 static void wz_finish(void)
@@ -1320,11 +1459,11 @@ static void wz_back(void) { if (wz_page > 0) wz_enter(wz_page - 1); }
 
 static void wz_line(const char *key, const char *desc, float y, u32 ck, u32 cd)
 {
-    draw_text(key, 36, y, 0.5f, ck, C2D_AlignLeft, 76);
+    if (key[0]) draw_text(key, 36, y, 0.5f, ck, C2D_AlignLeft, 76);
     draw_text(desc, 118, y, 0.5f, cd, C2D_AlignLeft, 260);
 }
 
-static void draw_wizard_top(void)
+static void draw_wizard_top(void)         /* welcome and controls pages (the setup page shows the live player) */
 {
     u32 cText = C(S.text), cAcc = C(S.accent);
     u32 cDim = C(mix_rgb(S.text, S.bg, 120));
@@ -1333,28 +1472,25 @@ static void draw_wizard_top(void)
     rrect(14, 12, 372, 214, 16, 0.20f, cCard);
     C2D_DrawRectSolid(30, 12, 0.21f, 340, 1, C(mix_rgb(S.bg, S.text, 30)));
 
-    if (wz_page == 0) {
+    if (wz_page == WZ_WELCOME) {
         draw_text("Welcome to", 200, 26, 0.55f, cDim, C2D_AlignCenter, 0);
         draw_text("PROJECT NOISE", 200, 48, 0.95f, cAcc, C2D_AlignCenter, 360);
         draw_text("A native music player for MP3, FLAC and WAV.", 200, 98, 0.5f, cText, C2D_AlignCenter, 350);
-        draw_text("Let's set it up - this takes about 30 seconds.", 200, 124, 0.5f, cDim, C2D_AlignCenter, 350);
+        draw_text("Two quick steps and you're listening.", 200, 124, 0.5f, cDim, C2D_AlignCenter, 350);
         draw_text("You can change everything later in Settings (SELECT).", 200, 150, 0.42f, cDim, C2D_AlignCenter, 350);
         draw_text("Press A or tap Next to begin", 200, 192, 0.42f, cAcc, C2D_AlignCenter, 0);
-    } else if (wz_page == 4) {
-        draw_text("Controls", 200, 20, 0.75f, cAcc, C2D_AlignCenter, 0);
-        wz_line("A",      "Play song / open folder",          62, cAcc, cText);
-        wz_line("B",      "Pause",                            86, cAcc, cText);
-        wz_line("L / R",  "Back / forward 5 seconds",         110, cAcc, cText);
-        wz_line("D-pad",  "Move in list (Left/Right = page)", 134, cAcc, cText);
-        wz_line("X / Y",  "Search / Shuffle",                 158, cAcc, cText);
+    } else {
+        char skip[48];
+        snprintf(skip, sizeof skip, "Left / Right: back / forward %d sec", S.seek_step);
+        draw_text("Controls", 200, 18, 0.75f, cAcc, C2D_AlignCenter, 0);
+        wz_line("A",      "Play song / open folder",          50,  cAcc, cText);
+        wz_line("B",      "Pause",                            72,  cAcc, cText);
+        wz_line("L / R",  "Previous / next song",             94,  cAcc, cText);
+        wz_line("D-pad",  skip,                               116, cAcc, cText);
+        wz_line("",       "Up / Down: move through the list", 138, cAcc, cText);
+        wz_line("X / Y",  "Search / Shuffle",                 160, cAcc, cText);
         wz_line("SELECT", "Open Settings",                    182, cAcc, cText);
-        wz_line("START",  "Exit the app",                     206 - 2, cAcc, cText);
-    } else {                                                  /* final page */
-        draw_text("You're all set!", 200, 34, 0.9f, cAcc, C2D_AlignCenter, 0);
-        draw_text("Pick a song from the list on the bottom screen.", 200, 92, 0.48f, cText, C2D_AlignCenter, 350);
-        draw_text("Music lives in SD:/Music/", 200, 116, 0.48f, cDim, C2D_AlignCenter, 350);
-        draw_text("Want this guide again?", 200, 152, 0.42f, cDim, C2D_AlignCenter, 0);
-        draw_text("Settings > General > Show setup guide", 200, 172, 0.42f, cDim, C2D_AlignCenter, 350);
+        wz_line("START",  "Exit the app",                     204, cAcc, cText);
     }
 }
 
@@ -1378,7 +1514,7 @@ static void draw_wizard_bottom(void)
 
     if (WZ_CARD[wz_page] >= 0) {
         draw_card(WZ_CARD[wz_page]);
-    } else if (wz_page == 0) {                                /* quick checks */
+    } else if (wz_page == WZ_WELCOME) {                       /* quick checks */
         rrect(6, 62, 308, 96, 10, 0.26f, cCard);
         draw_text("Sound", 18, 70, 0.5f, cText, C2D_AlignLeft, 100);
         draw_text(audio_ok ? "Ready" : "DSP firmware missing", 306, 70, 0.5f, audio_ok ? cAcc : cDanger, C2D_AlignRight, 190);
@@ -1391,32 +1527,19 @@ static void draw_wizard_bottom(void)
         draw_text(buf, 306, 118, 0.5f, have ? cAcc : cDim, C2D_AlignRight, 170);
         draw_text("SD:/Music/  (.mp3  .flac  .wav)", 18, 138, 0.36f, cDim, C2D_AlignLeft, 290);
         if (!have) draw_text("Copy your songs there from a PC any time.", 160, 170, 0.4f, cDim, C2D_AlignCenter, 300);
-    } else if (wz_page == 4) {                                /* touch guide */
+    } else {                                                  /* touch guide */
         rrect(6, 62, 308, 118, 10, 0.26f, cCard);
         static const char *T[6] = {
             "Tap a song to play, a folder to open",
             "Drag the list up / down to scroll",
-            "Tap the search bar to find a song",
             "Drag the seek bar to jump in a song",
-            "Shuffle / previous / play / next / repeat",
-            "Tap the ... button for Settings"
+            "Tap the search bar to find a song",
+            "Tap the ... button for Settings",
+            "Replay this guide: Settings > General"
         };
         for (int i = 0; i < 6; i++) {
             C2D_DrawCircleSolid(20, 75 + i * 18, 0.30f, 3, cAcc);
             draw_text(T[i], 30, 67 + i * 18, 0.42f, cText, C2D_AlignLeft, 278);
-        }
-    } else {                                                  /* summary */
-        rrect(6, 62, 308, 118, 10, 0.26f, cCard);
-        static const char *CLK[3] = { "Off", "12-hour", "24-hour" };
-        const char *k[4] = { "Theme", "Clock", "Battery %", "Lid closed" };
-        char v[4][24];
-        snprintf(v[0], sizeof v[0], "%s", S.preset >= 0 ? PRESET_NAMES[S.preset] : "Custom");
-        snprintf(v[1], sizeof v[1], "%s", CLK[S.clock_mode]);
-        snprintf(v[2], sizeof v[2], "%s", S.show_batt ? "On" : "Off");
-        snprintf(v[3], sizeof v[3], "%s", S.lid_play ? "Keeps playing" : "Sleeps");
-        for (int i = 0; i < 4; i++) {
-            draw_text(k[i], 18, 72 + i * 26, 0.5f, cDim, C2D_AlignLeft, 120);
-            draw_text(v[i], 306, 72 + i * 26, 0.5f, cAcc, C2D_AlignRight, 170);
         }
     }
 
@@ -1489,7 +1612,7 @@ static void toast(const char *msg)
     toast_t = 75;                              /* ~1.2 s */
 }
 
-/* L / R: jump `secs` seconds from the current position. Going past the end plays the next track. */
+/* D-pad Left / Right: jump `secs` seconds from the current position. Going past the end plays the next track. */
 static void skip_seconds(int secs)
 {
     if (!track_loaded || !audio_ok || !audio_is_active()) return;
@@ -1498,7 +1621,9 @@ static void skip_seconds(int secs)
     if (target < 0) target = 0;
     if (secs > 0 && target + 500 >= (long)cur.duration_ms) { next_track(true); return; }
     seek_to((float)target / (float)cur.duration_ms);
-    toast(secs > 0 ? "+5 sec" : "-5 sec");
+    char msg[24];
+    snprintf(msg, sizeof msg, "%+d sec", secs);
+    toast(msg);
 }
 
 static void handle_ctrl_tap(int px, int py)      /* bottom bar: slider on top, buttons below */
@@ -1510,12 +1635,12 @@ static void handle_ctrl_tap(int px, int py)      /* bottom bar: slider on top, b
         }
         return;
     }
-    if (px < 88)       { S.shuffle = !S.shuffle; mark_dirty(); }
-    else if (px < 136) prev_track();
-    else if (px < 184) toggle_play();
-    else if (px < 232) next_track(true);
-    else if (px < 278) { S.repeat = (S.repeat + 1) % 3; mark_dirty(); }
-    else               { settings_open = true; set_row = 0; }
+    if (px < 88)       { flash_ctrl(64);  S.shuffle = !S.shuffle; mark_dirty(); }
+    else if (px < 136) skip_prev();
+    else if (px < 184) { flash_ctrl(160); toggle_play(); }
+    else if (px < 232) skip_next();
+    else if (px < 278) { flash_ctrl(256); S.repeat = (S.repeat + 1) % 3; mark_dirty(); }
+    else               { flash_ctrl(298); settings_open = true; set_row = 0; }
 }
 
 static void handle_header_tap(int px)    /* the search bar: tap = type a query, "x" = leave the results */
@@ -1534,11 +1659,11 @@ static void set_accent(int i)
 }
 
 /* touch on a settings card (Settings tabs and setup steps share this) */
-static void card_touch(touchPosition tp, int page)
+static void card_touch(touchPosition tp, int card)
 {
-    int i = (int)(((float)tp.py - 62.0f) / PAGE_ROWH[page]);
-    if (tp.py < 62 || i < 0 || i >= PAGE_COUNT[page]) return;
-    int r = PAGE_FIRST[page] + i;
+    int i = (int)(((float)tp.py - 62.0f) / CARD_ROWH[card]);
+    if (tp.py < 62 || i < 0 || i >= CARD_LEN[card]) return;
+    int r = CARD_ROWS[card][i];
     set_row = r;
 
     if (r == ROW_EXIT)  { confirm_exit = true; confirm_sel = 0; return; }
@@ -1547,7 +1672,7 @@ static void card_touch(touchPosition tp, int page)
 
     if (is_slider_row(r)) {
         if (tp.px >= SS_X0 - 12 && tp.px <= SS_X1 + 12) { set_drag = r; slider_apply(r, tp.px, tp.py); }
-    } else if (r == ROW_PRESET || r == ROW_EQPRE || r == ROW_CLOCK) {
+    } else if (is_choice_row(r)) {
         if (tp.px >= 150 && tp.px < 232)      set_adjust(-1);
         else if (tp.px >= 232)                set_adjust(+1);
     } else if (r == ROW_ACCENT) {
@@ -1587,11 +1712,11 @@ static void handle_settings_touch(touchPosition tp)
         int t = ((int)tp.px - 10) / 100;
         if (t < 0) t = 0;
         if (t > 2) t = 2;
-        set_row = PAGE_FIRST[t];
+        set_row = TAB_FIRST[t];
         return;
     }
     int page = row_page(set_row);
-    if (page == 1) sound_touch(tp); else card_touch(tp, page);
+    if (page == 1) sound_touch(tp); else card_touch(tp, page == 0 ? CARD_LOOK : CARD_GENERAL);
 }
 
 static void handle_wizard_touch(touchPosition tp)
@@ -1661,13 +1786,14 @@ int main(void)
         /* ---- track end / error handling ---- */
         if (audio_take_finished()) {
             if (S.repeat == 2) play_q(qi); else next_track(false);
+            follow_playing();
         }
         if (audio_take_error()) snprintf(status_msg, sizeof status_msg, "Can't play this file");
 
         /* ---- always-on playback keys ---- */
-        if (!dlg && !wizard_open) {          /* L / R: skip 5 seconds back / forward */
-            if (kd & KEY_L) skip_seconds(-5);
-            if (kd & KEY_R) skip_seconds(+5);
+        if (!dlg && !wizard_open) {          /* L / R: previous / next song */
+            if (kd & KEY_L) skip_prev();
+            if (kd & KEY_R) skip_next();
         }
 
         if (dlg) {
@@ -1684,9 +1810,10 @@ int main(void)
             if (kd & KEY_B) wz_back();
             int card = WZ_CARD[wz_page];
             if (card >= 0) {
-                int first = PAGE_FIRST[card], last = first + PAGE_COUNT[card] - 1;
-                if (repeat_fire(kh, KEY_DUP, &hold_up) && set_row > first) set_row--;
-                if (repeat_fire(kh, KEY_DDOWN, &hold_down) && set_row < last) set_row++;
+                int pos = card_pos(card, set_row);
+                if (pos < 0) pos = 0;
+                if (repeat_fire(kh, KEY_DUP, &hold_up) && pos > 0) set_row = CARD_ROWS[card][pos - 1];
+                if (repeat_fire(kh, KEY_DDOWN, &hold_down) && pos < CARD_LEN[card] - 1) set_row = CARD_ROWS[card][pos + 1];
                 bool fl = repeat_fire(kh, KEY_DLEFT, &hold_left), fr = repeat_fire(kh, KEY_DRIGHT, &hold_right);
                 if (is_switch_row(set_row)) { fl = (kd & KEY_DLEFT) != 0; fr = (kd & KEY_DRIGHT) != 0; }
                 if (fl) set_adjust(-1);
@@ -1706,7 +1833,7 @@ int main(void)
             if (band) {
                 /* vertical sliders: Left/Right pick the band, Up/Down move it; the panel's ends lead out of it */
                 if (repeat_fire(kh, KEY_DLEFT, &hold_left))   set_row = (set_row > ROW_B0) ? set_row - 1 : ROW_EQPRE;
-                if (repeat_fire(kh, KEY_DRIGHT, &hold_right)) set_row = (set_row < ROW_B4) ? set_row + 1 : ROW_LID;
+                if (repeat_fire(kh, KEY_DRIGHT, &hold_right)) set_row = (set_row < ROW_B4) ? set_row + 1 : ROW_SEEK;
                 bool gu = repeat_fire(kh, KEY_DUP, &hold_up), gd = repeat_fire(kh, KEY_DDOWN, &hold_down);
                 if (is_band_row(set_row)) {
                     if (gu) set_adjust(+1);
@@ -1721,7 +1848,7 @@ int main(void)
                 if (fl) set_adjust(-1);
                 if (fr) set_adjust(+1);
                 if (kd & KEY_A) {
-                    if (is_switch_row(set_row) || set_row == ROW_CLOCK) set_adjust(+1);
+                    if (is_switch_row(set_row) || set_row == ROW_CLOCK || set_row == ROW_GLOW || set_row == ROW_SEEK) set_adjust(+1);
                     else if (set_row == ROW_GUIDE) start_wizard();
                     else if (set_row == ROW_EXIT) { confirm_exit = true; confirm_sel = 0; }
                 }
@@ -1745,8 +1872,8 @@ int main(void)
 
             if (repeat_fire(kh, KEY_DUP, &hold_up))     move_sel(-1);
             if (repeat_fire(kh, KEY_DDOWN, &hold_down)) move_sel(+1);
-            if (repeat_fire(kh, KEY_DLEFT, &hold_left))   move_sel(-VIS_ROWS);
-            if (repeat_fire(kh, KEY_DRIGHT, &hold_right)) move_sel(+VIS_ROWS);
+            if (repeat_seek(kh, KEY_DLEFT, &hold_left))   skip_seconds(-S.seek_step);   /* back */
+            if (repeat_seek(kh, KEY_DRIGHT, &hold_right)) skip_seconds(+S.seek_step);   /* forward */
 
             /* touch: controls act on press; list rows act on release (tap) */
             if (kd & KEY_TOUCH) {
@@ -1789,6 +1916,7 @@ int main(void)
 
         if (audio_is_active() && !audio_is_paused()) eq_phase += 0.08f;
         if (toast_t > 0) toast_t--;
+        if (ctrl_flash_t > 0) ctrl_flash_t--;
         if (S.show_batt) { if (--batt_timer <= 0) { batt_poll(); batt_timer = 120; } }   /* every ~2 s */
 
         /* ---- draw ---- */
@@ -1801,13 +1929,12 @@ int main(void)
         u32 bg = C(S.bg);
         C2D_TargetClear(top, bg);
         C2D_SceneBegin(top);
-        bg_gradient(400);
-        if (wizard_open && (wz_page == 0 || wz_page >= 4)) draw_wizard_top();
-        else draw_top();
+        if (wizard_open && wz_page != WZ_SETUP) { bg_gradient(TOP_W); draw_wizard_top(); }
+        else draw_top();                                     /* draws its own (ambient) background */
 
         C2D_TargetClear(bot, bg);
         C2D_SceneBegin(bot);
-        bg_gradient(320);
+        bg_gradient(BOT_W);
         if (search_busy > 0) draw_search_busy();
         else if (confirm_exit) draw_exit_confirm();
         else if (wizard_open) draw_wizard_bottom();

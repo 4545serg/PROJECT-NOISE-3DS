@@ -20,6 +20,9 @@ const char *PRESET_NAMES[PRESET_COUNT] = {
     "Noise", "Emerald", "Ocean", "Sunset", "Mono"
 };
 
+const char *GLOW_NAMES[GLOW_COUNT] = { "Off", "Soft", "Vivid" };
+const int   SEEK_STEPS[SEEK_STEP_COUNT] = { 5, 10, 15, 30 };
+
 static const int eq_presets[EQ_PRESET_COUNT][EQ_BANDS] = {
     {  0,  0,  0,  0,  0 },   /* Flat        */
     {  6,  4,  0,  0,  0 },   /* Bass Boost  */
@@ -76,6 +79,8 @@ void settings_defaults(Settings *s)
     memset(s, 0, sizeof(*s));
     settings_apply_preset(s, 0);
     s->volume = 80;
+    s->glow = 2;
+    s->seek_step = 5;
     settings_apply_eq_preset(s, 0);
     s->shuffle = false;
     s->repeat = 1;
@@ -126,6 +131,10 @@ void settings_load(Settings *s)
             s->clock_mode = atoi(value);
         else if (!strcmp(key, "show_batt"))
             s->show_batt = atoi(value) != 0;
+        else if (!strcmp(key, "glow"))
+            s->glow = atoi(value);
+        else if (!strcmp(key, "seek_step"))
+            s->seek_step = atoi(value);
         else if (!strcmp(key, "setup_done"))
             s->setup_done = atoi(value) != 0;
         else if (!strcmp(key, "shuffle"))
@@ -142,6 +151,12 @@ void settings_load(Settings *s)
     if (s->volume > 100) s->volume = 100;
     if (s->repeat < 0 || s->repeat > 2) s->repeat = 1;
     if (s->clock_mode < 0 || s->clock_mode > 2) s->clock_mode = 0;
+    if (s->glow < 0 || s->glow >= GLOW_COUNT) s->glow = 2;
+    {
+        bool ok = false;
+        for (int i = 0; i < SEEK_STEP_COUNT; i++) if (s->seek_step == SEEK_STEPS[i]) ok = true;
+        if (!ok) s->seek_step = 5;
+    }
     if (s->eq_preset < 0) { s->eq_manual = true; s->eq_preset = 0; }   /* older files: "custom" = manual */
     if (s->eq_preset >= EQ_PRESET_COUNT) s->eq_preset = 0;
     for (int i = 0; i < EQ_BANDS; i++) {
@@ -171,6 +186,8 @@ bool settings_save(const Settings *s)
     fprintf(f, "lid_play=%d\n", s->lid_play ? 1 : 0);
     fprintf(f, "clock_mode=%d\n", s->clock_mode);
     fprintf(f, "show_batt=%d\n", s->show_batt ? 1 : 0);
+    fprintf(f, "glow=%d\n", s->glow);
+    fprintf(f, "seek_step=%d\n", s->seek_step);
     fprintf(f, "setup_done=%d\n", s->setup_done ? 1 : 0);
     fprintf(f, "shuffle=%d\n", s->shuffle ? 1 : 0);
     fprintf(f, "repeat=%d\n", s->repeat);

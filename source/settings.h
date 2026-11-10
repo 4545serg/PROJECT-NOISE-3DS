@@ -19,6 +19,8 @@ typedef struct {
     bool lid_play;                   /* keep playing when the lid is closed */
     int  clock_mode;                 /* top-screen clock: 0 = off, 1 = 12-hour, 2 = 24-hour */
     bool show_batt;                  /* top-screen battery percentage */
+    int  glow;                       /* ambient glow around the cover: 0 = off, 1 = soft, 2 = vivid */
+    int  seek_step;                  /* D-pad Left/Right skip length in seconds (5 / 10 / 15 / 30) */
     bool setup_done;                 /* first-run setup + guide has been completed */
     bool shuffle;
     int  repeat;                     /* 0 = off, 1 = all, 2 = one         */
@@ -27,6 +29,11 @@ typedef struct {
 
 #define PRESET_COUNT 5
 extern const char *PRESET_NAMES[PRESET_COUNT];
+
+#define GLOW_COUNT 3
+extern const char *GLOW_NAMES[GLOW_COUNT];
+#define SEEK_STEP_COUNT 4
+extern const int SEEK_STEPS[SEEK_STEP_COUNT];
 
 #define EQ_PRESET_COUNT 6
 extern const char *EQ_PRESET_NAMES[EQ_PRESET_COUNT];
