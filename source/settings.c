@@ -80,15 +80,12 @@ void settings_defaults(Settings *s)
 {
     memset(s, 0, sizeof(*s));
     settings_apply_preset(s, 0);
-    s->volume = 80;
     s->glow = 2;
     s->seek_step = 5;
     s->fade_speed = 1;
     settings_apply_eq_preset(s, 0);
     s->shuffle = false;
     s->sleep_minutes = 15;
-    s->audio_fade = 1;
-    s->carousel_mode = 0;
     s->repeat = 1;
     snprintf(s->last_dir, sizeof(s->last_dir), "%s", MUSIC_ROOT);
 }
@@ -120,8 +117,6 @@ void settings_load(Settings *s)
             s->select = from_hex(parsed);
         else if (!strcmp(key, "preset") && sscanf(value, "%d", (int *)&parsed) == 1)
             s->preset = (int)parsed;
-        else if (!strcmp(key, "volume") && sscanf(value, "%d", (int *)&parsed) == 1)
-            s->volume = (int)parsed;
         else if (!strcmp(key, "eq_preset") && sscanf(value, "%d", (int *)&parsed) == 1)
             s->eq_preset = (int)parsed;
         else if (!strcmp(key, "eq_user") || !strcmp(key, "eq")) {      /* "eq" = older settings files */
@@ -131,8 +126,6 @@ void settings_load(Settings *s)
         }
         else if (!strcmp(key, "eq_manual"))
             s->eq_manual = atoi(value) != 0;
-        else if (!strcmp(key, "lid_play"))
-            s->lid_play = atoi(value) != 0;
         else if (!strcmp(key, "clock_mode"))
             s->clock_mode = atoi(value);
         else if (!strcmp(key, "show_batt"))
@@ -149,10 +142,6 @@ void settings_load(Settings *s)
             s->shuffle = atoi(value) != 0;
         else if (!strcmp(key, "sleep_minutes"))
             s->sleep_minutes = atoi(value);
-        else if (!strcmp(key, "audio_fade"))
-            s->audio_fade = atoi(value);
-        else if (!strcmp(key, "carousel_mode"))
-            s->carousel_mode = atoi(value);
         else if (!strcmp(key, "repeat") && sscanf(value, "%d", (int *)&parsed) == 1)
             s->repeat = (int)parsed;
         else if (!strcmp(key, "last_dir") &&
@@ -161,12 +150,8 @@ void settings_load(Settings *s)
     }
     fclose(f);
 
-    if (s->volume < 0) s->volume = 0;
-    if (s->volume > 100) s->volume = 100;
     if (s->repeat < 0 || s->repeat > 2) s->repeat = 1;
     { const int opts[] = {5,10,15,30,45,60}; bool ok = false; for (int i=0;i<6;i++) if (s->sleep_minutes == opts[i]) ok = true; if (!ok) s->sleep_minutes = 15; }
-    if (s->audio_fade < 0 || s->audio_fade > 2) s->audio_fade = 1;
-    if (s->carousel_mode < 0 || s->carousel_mode > 2) s->carousel_mode = 0;
     if (s->clock_mode < 0 || s->clock_mode > 2) s->clock_mode = 0;
     if (s->glow < 0 || s->glow >= GLOW_COUNT) s->glow = 2;
     if (s->fade_speed < 0 || s->fade_speed >= FADE_COUNT) s->fade_speed = 1;
@@ -197,11 +182,9 @@ bool settings_save(const Settings *s)
     fprintf(f, "accent=%06X\n", (unsigned)to_hex(s->accent));
     fprintf(f, "select=%06X\n", (unsigned)to_hex(s->select));
     fprintf(f, "preset=%d\n", s->preset);
-    fprintf(f, "volume=%d\n", s->volume);
     fprintf(f, "eq_preset=%d\n", s->eq_preset);
     fprintf(f, "eq_manual=%d\n", s->eq_manual ? 1 : 0);
     fprintf(f, "eq_user=%d,%d,%d,%d,%d\n", s->eq_user[0], s->eq_user[1], s->eq_user[2], s->eq_user[3], s->eq_user[4]);
-    fprintf(f, "lid_play=%d\n", s->lid_play ? 1 : 0);
     fprintf(f, "clock_mode=%d\n", s->clock_mode);
     fprintf(f, "show_batt=%d\n", s->show_batt ? 1 : 0);
     fprintf(f, "glow=%d\n", s->glow);
@@ -210,8 +193,6 @@ bool settings_save(const Settings *s)
     fprintf(f, "setup_done=%d\n", s->setup_done ? 1 : 0);
     fprintf(f, "shuffle=%d\n", s->shuffle ? 1 : 0);
     fprintf(f, "sleep_minutes=%d\n", s->sleep_minutes);
-    fprintf(f, "audio_fade=%d\n", s->audio_fade);
-    fprintf(f, "carousel_mode=%d\n", s->carousel_mode);
     fprintf(f, "repeat=%d\n", s->repeat);
     fprintf(f, "last_dir=%s\n", s->last_dir);
     fclose(f);

@@ -30,8 +30,6 @@ static volatile float  g_req_frac = -1.0f;   /* >= 0: start this far into the fi
 static volatile u32    g_req_ms;
 static volatile bool   g_want_pause;
 static volatile int    g_want_vol = 80;
-static volatile int    g_fade_mode = 1;
-static volatile float  g_visual_level = 0.0f;
 static volatile bool   g_active, g_finished, g_error;
 static volatile u32    g_rate, g_played; /* Hz, frames played so far */
 
@@ -54,9 +52,6 @@ static s16            *out_pcm;
 static int             fill_i, rec_i;
 static bool            applied_pause;
 static int             applied_vol = -1;
-static bool            g_stop_fading = false;
-static u64             g_fade_started = 0, g_stop_started = 0;
-static float           g_fade_gain = 1.0f;
 static bool            ready;
 
 /* ---- 5-band peaking equalizer (RBJ biquads, run on the audio thread) ---- */
@@ -299,12 +294,11 @@ static void handle_request(void)
     g_req = 0;
     LightLock_Unlock(&g_lock);
 
-    if (req == 2) { g_stop_fading = true; g_stop_started = osGetTime(); return; }
-
     ndspChnReset(0);
     for (int i = 0; i < NBUF; i++) { wq[i] = false; memset(&wb[i], 0, sizeof wb[i]); }
     close_track();
-    g_stop_fading = false;
+
+    if (req == 2) { g_active = false; return; }
 
     if (!open_track(path, start, frac)) {
         close_track();
@@ -322,10 +316,8 @@ static void handle_request(void)
 
     ndspChnSetInterp(0, NDSP_INTERP_LINEAR);
     ndspChnSetFormat(0, NDSP_FORMAT_STEREO_PCM16);
-    g_fade_started = osGetTime();
-    g_fade_gain = (g_fade_mode == 0) ? 1.0f : 0.0f;
-    apply_volume((int)(g_want_vol * g_fade_gain));
-    applied_vol = (int)(g_want_vol * g_fade_gain);
+    apply_volume(g_want_vol);
+    applied_vol = g_want_vol;
     ndspChnSetPaused(0, false);
     applied_pause = false;
     g_active = true;
@@ -348,12 +340,6 @@ static void pump(void)
 
         if (g_eq_dirty || hz != eq_hz) eq_update(hz);
         eq_process(dst, frames);
-        {
-            int peak = 0;
-            for (int k = 0; k < frames * 2; k++) { int v = dst[k] < 0 ? -dst[k] : dst[k]; if (v > peak) peak = v; }
-            float level = (float)peak / 32768.0f;
-            if (level > g_visual_level) g_visual_level = level; else g_visual_level = g_visual_level * 0.72f + level * 0.28f;
-        }
 
         if (!rate_set) {
             ndspChnSetRate(0, (float)hz);
@@ -390,27 +376,9 @@ static void audio_thread(void *arg)
             ndspChnSetPaused(0, g_want_pause);
             applied_pause = g_want_pause;
         }
-        if (g_stop_fading) {
-            u64 elapsed = osGetTime() - g_stop_started;
-            float duration = (g_fade_mode == 0) ? 0.0f : (g_fade_mode == 1 ? 180.0f : 420.0f);
-            float gain = duration <= 0.0f ? 0.0f : 1.0f - (float)elapsed / duration;
-            if (gain < 0.0f) gain = 0.0f;
-            int v = (int)(g_want_vol * gain);
-            if (v != applied_vol) { apply_volume(v); applied_vol = v; }
-            if (gain <= 0.0f) {
-                ndspChnReset(0);
-                for (int i = 0; i < NBUF; i++) { wq[i] = false; memset(&wb[i], 0, sizeof wb[i]); }
-                close_track(); g_stop_fading = false; g_active = false; g_visual_level = 0.0f;
-            }
-        } else {
-            if (g_fade_mode != 0 && (fp || flac)) {
-                u64 elapsed = osGetTime() - g_fade_started;
-                float duration = (g_fade_mode == 1) ? 180.0f : 420.0f;
-                g_fade_gain = (float)elapsed / duration;
-                if (g_fade_gain > 1.0f) g_fade_gain = 1.0f;
-            } else g_fade_gain = 1.0f;
-            int v = (int)(g_want_vol * g_fade_gain);
-            if (v != applied_vol) { apply_volume(v); applied_vol = v; }
+        if (g_want_vol != applied_vol) {
+            apply_volume(g_want_vol);
+            applied_vol = g_want_vol;
         }
         if (fp || flac) pump();
 
@@ -495,7 +463,6 @@ void audio_stop(void)
     g_req = 2;
     LightLock_Unlock(&g_lock);
     g_active = false;
-    /* Keep the channel alive briefly so the worker can ramp the mixer down. */
 }
 
 void audio_pause(void)  { g_want_pause = true; }
@@ -516,9 +483,6 @@ void audio_set_volume(int percent)
     if (percent > 100) percent = 100;
     g_want_vol = percent;
 }
-
-void audio_set_fade_mode(int mode) { if (mode < 0) mode = 0; if (mode > 2) mode = 2; g_fade_mode = mode; }
-float audio_visualizer_level(void) { return g_visual_level; }
 
 void audio_set_eq(const int gains_db[5])
 {

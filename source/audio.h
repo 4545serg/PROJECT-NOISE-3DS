@@ -18,8 +18,6 @@ bool audio_is_active(void);            /* a track is loaded (playing or paused) 
 bool audio_is_paused(void);
 u32  audio_position_ms(void);
 void audio_set_volume(int percent);    /* 0..100 */
-void audio_set_fade_mode(int mode);    /* 0 off, 1 short, 2 gentle */
-float audio_visualizer_level(void);    /* recent decoded PCM peak, 0..1 */
 void audio_set_eq(const int gains_db[5]);   /* 5-band equalizer: 60/230/910/3.6k/14k Hz, -12..+12 dB */
 
 bool audio_take_finished(void);        /* true once when a track ended naturally */
