@@ -1123,7 +1123,7 @@ static void draw_wallpaper_accents(float width, float height)
                                 C(mix_rgb(S.bg, S.accent, 12)));
         }
     } else if (S.wallpaper == 3 || S.wallpaper == 4) {
-        Rgb tint = S.wallpaper == 3 ? hex_rgb(0xA78BFA) : hex_rgb(0xFF7A45);
+        Rgb tint = S.wallpaper == 3 ? (Rgb){0xA7, 0x8B, 0xFA} : (Rgb){0xFF, 0x7A, 0x45};
         for (int i = 0; i < 12; i++) {
             float yy = 18.0f + i * 19.0f;
             C2D_DrawRectSolid(0, yy, 0.08f, width, 1.0f,
