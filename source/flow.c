@@ -1,37 +1,143 @@
 #include "flow.h"
 
+#include <3ds.h>
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "art.h"
 #include "meta.h"
+#include "noise.h"
 
-#define SLOTS     12
+#define SLOTS      20
+#define COVER_DIR  DATA_DIR "/covers"
+#define CACHE_MAGIC 0x31435A4Eu          /* "NZC1" */
 #define CX        200.0f       /* screen-space centre of the flow (top screen is 400 wide) */
 #define CY        72.0f        /* vertical centre of the covers (cover is 128 tall at y=8) */
 #define FACE      128.0f       /* face-on cover size */
 #define SIDE_W    40.0f        /* on-screen width of a turned cover */
 #define INNER_GAP 6.0f         /* gap between the centre cover and the first side cover */
 #define STEP      28.0f        /* spacing of the side covers */
-#define REFLECT   0.22f        /* reflection height as a fraction of the cover */
+#define REFLECT   0.18f        /* reflection height as a fraction of the cover */
+#define FADE_FRAMES 10.0f
 
 typedef struct {
-    int     idx, gen, state;   /* state: 0 free, 1 own texture, 2 no artwork (placeholder) */
-    unsigned last_use;
-    C3D_Tex tex;
+    int      idx, gen, state;  /* state: 0 free, 1 own texture, 2 no artwork (placeholder) */
+    unsigned last_use, born;
+    C3D_Tex  tex;
 } Slot;
 
+/* ---- main-thread cache ---- */
 static Slot     g_slot[SLOTS];
-static int      g_gen = 1;
 static unsigned g_tick;
 static C3D_Tex  g_ph;
 static bool     g_ph_ok;
+
+/* ---- shared with the loader thread (guarded by g_lk) ---- */
+static LightLock     g_lk;
+static Thread        g_thread;
+static volatile bool g_quit;
+static volatile int  g_gen = 1;
+static FlowWant      g_want[FLOW_MAX_WANT];
+static int           g_nwant;
+static int           g_busy = -1;                 /* index being loaded right now */
+static bool          g_mb_full;                   /* one finished cover waiting for upload */
+static int           g_mb_idx, g_mb_gen, g_mb_state;
+static u8           *g_mb_px;                     /* the loader decodes straight into this */
+
+/* ------------------------------------------------------- loader thread */
+static u32 fnv(const char *s, u32 h)
+{
+    for (; *s; s++) { h ^= (unsigned char)*s; h *= 16777619u; }
+    return h;
+}
+
+/* returns 1 = cover decoded into px, 2 = no usable artwork */
+static int load_job(const char *path, u8 *px)
+{
+    struct stat st;
+    u32 size = 0, mtime = 0;
+    if (stat(path, &st) == 0) { size = (u32)st.st_size; mtime = (u32)st.st_mtime; }
+
+    char cpath[96];
+    snprintf(cpath, sizeof cpath, COVER_DIR "/%08x%08x.cv", (unsigned)fnv(path, 2166136261u),
+             (unsigned)fnv(path, 0x9E3779B9u));
+
+    FILE *cf = fopen(cpath, "rb");
+    if (cf) {
+        u32 hd[4];
+        if (fread(hd, sizeof(u32), 4, cf) == 4 && hd[0] == CACHE_MAGIC && hd[1] == size && hd[2] == mtime) {
+            if (hd[3] == 2) { fclose(cf); return 2; }
+            if (hd[3] == 1 && fread(px, 1, ART_PIXEL_BYTES, cf) == ART_PIXEL_BYTES) { fclose(cf); return 1; }
+        }
+        fclose(cf);
+    }
+
+    TrackMeta m;
+    u8 *art = NULL;
+    size_t asz = 0;
+    int state = 2;
+    if (meta_read(path, &m, &art, &asz, false) && art && asz && art_decode(art, asz, px)) state = 1;
+    free(art);
+
+    cf = fopen(cpath, "wb");
+    if (cf) {
+        u32 hd[4] = { CACHE_MAGIC, size, mtime, (u32)state };
+        fwrite(hd, sizeof(u32), 4, cf);
+        if (state == 1) fwrite(px, 1, ART_PIXEL_BYTES, cf);
+        fclose(cf);
+    }
+    return state;
+}
+
+static void loader(void *arg)
+{
+    (void)arg;
+    while (!g_quit) {
+        FlowWant job;
+        int gen = 0;
+        bool have = false;
+
+        LightLock_Lock(&g_lk);
+        if (!g_mb_full && g_nwant > 0) {
+            job = g_want[0];
+            memmove(&g_want[0], &g_want[1], sizeof(FlowWant) * (size_t)(g_nwant - 1));
+            g_nwant--;
+            g_busy = job.idx;
+            gen = g_gen;
+            have = true;
+        }
+        LightLock_Unlock(&g_lk);
+
+        if (!have) { svcSleepThread(8 * 1000 * 1000LL); continue; }
+
+        int st = load_job(job.path, g_mb_px);
+
+        LightLock_Lock(&g_lk);
+        if (gen == g_gen) { g_mb_idx = job.idx; g_mb_gen = gen; g_mb_state = st; g_mb_full = true; }
+        g_busy = -1;
+        LightLock_Unlock(&g_lk);
+    }
+}
 
 /* ------------------------------------------------------------------ cache */
 void flow_init(const unsigned char *png, size_t size)
 {
     g_ph_ok = (png && size) ? art_build_tex(&g_ph, png, size) : false;
+
+    mkdir(DATA_ROOT, 0777);
+    mkdir(DATA_DIR, 0777);
+    mkdir(COVER_DIR, 0777);
+
+    LightLock_Init(&g_lk);
+    g_mb_px = malloc(ART_PIXEL_BYTES);
+    if (!g_mb_px) return;
+
+    APT_SetAppCpuTimeLimit(30);                   /* lets an Old 3DS app use the second core */
+    g_thread = threadCreate(loader, NULL, 128 * 1024, 0x30, 1, false);
+    if (!g_thread) g_thread = threadCreate(loader, NULL, 128 * 1024, 0x3F, -2, false);
 }
 
 static void slot_free(Slot *s)
@@ -42,15 +148,27 @@ static void slot_free(Slot *s)
 
 void flow_shutdown(void)
 {
+    if (g_thread) {
+        g_quit = true;
+        threadJoin(g_thread, U64_MAX);
+        threadFree(g_thread);
+        g_thread = NULL;
+    }
     for (int i = 0; i < SLOTS; i++) slot_free(&g_slot[i]);
     if (g_ph_ok) { C3D_TexDelete(&g_ph); g_ph_ok = false; }
+    free(g_mb_px);
+    g_mb_px = NULL;
 }
 
-/* Textures are freed lazily (in flow_load) because the GPU may still be reading
+/* Textures are freed lazily (when a slot is reused) because the GPU may still be reading
  * them for the frame in flight when the folder changes. */
-void flow_reset(void) { g_gen++; }
-
-void flow_begin_frame(void) { g_tick++; }
+void flow_reset(void)
+{
+    LightLock_Lock(&g_lk);
+    g_gen++;
+    g_nwant = 0;
+    LightLock_Unlock(&g_lk);
+}
 
 static Slot *find(int idx)
 {
@@ -59,46 +177,70 @@ static Slot *find(int idx)
     return NULL;
 }
 
-bool flow_has(int idx) { return find(idx) != NULL; }
+bool flow_known(int idx)
+{
+    if (find(idx)) return true;
+    LightLock_Lock(&g_lk);
+    bool k = (g_busy == idx) || (g_mb_full && g_mb_idx == idx && g_mb_gen == g_gen);
+    LightLock_Unlock(&g_lk);
+    return k;
+}
 
-C3D_Tex *flow_tex(int idx)
+void flow_want(const FlowWant *w, int n)
+{
+    if (n > FLOW_MAX_WANT) n = FLOW_MAX_WANT;
+    LightLock_Lock(&g_lk);
+    memcpy(g_want, w, sizeof(FlowWant) * (size_t)n);
+    g_nwant = n;
+    LightLock_Unlock(&g_lk);
+}
+
+C3D_Tex *flow_tex(int idx, float *fade)
 {
     Slot *s = find(idx);
     if (!s) return NULL;
     s->last_use = g_tick;
+    if (fade) {
+        float f = ((float)(g_tick - s->born)) / FADE_FRAMES;
+        *fade = f > 1.0f ? 1.0f : f;
+    }
     if (s->state == 1) return &s->tex;
     return g_ph_ok ? &g_ph : NULL;
 }
 
-void flow_load(int idx, const char *path)
+bool flow_pump(void)
 {
-    if (find(idx)) return;
+    g_tick++;
 
-    Slot *v = NULL;
-    for (int i = 0; i < SLOTS && !v; i++)
-        if (g_slot[i].state == 0) v = &g_slot[i];
-    for (int i = 0; i < SLOTS && !v; i++)
-        if (g_slot[i].gen != g_gen) v = &g_slot[i];
-    if (!v) {
-        v = &g_slot[0];
-        for (int i = 1; i < SLOTS; i++)
-            if (g_slot[i].last_use < v->last_use) v = &g_slot[i];
+    LightLock_Lock(&g_lk);
+    bool full = g_mb_full;
+    int idx = g_mb_idx, gen = g_mb_gen, st = g_mb_state;
+    LightLock_Unlock(&g_lk);
+    if (!full) return false;
+
+    if (gen == g_gen) {                            /* the loader never touches g_mb_px while it is full */
+        Slot *v = NULL;
+        for (int i = 0; i < SLOTS && !v; i++)
+            if (g_slot[i].state == 0) v = &g_slot[i];
+        for (int i = 0; i < SLOTS && !v; i++)
+            if (g_slot[i].gen != g_gen) v = &g_slot[i];
+        if (!v) {
+            v = &g_slot[0];
+            for (int i = 1; i < SLOTS; i++)
+                if (g_slot[i].last_use < v->last_use) v = &g_slot[i];
+        }
+        slot_free(v);
+        v->idx = idx;
+        v->gen = g_gen;
+        v->state = (st == 1 && art_upload(&v->tex, g_mb_px)) ? 1 : 2;
+        v->last_use = g_tick;
+        v->born = g_tick;
     }
-    slot_free(v);
 
-    TrackMeta m;
-    u8 *art = NULL;
-    size_t art_size = 0;
-    int state = 2;
-    if (meta_read(path, &m, &art, &art_size, false) && art && art_size) {
-        if (art_build_tex(&v->tex, art, art_size)) state = 1;
-    }
-    free(art);
-
-    v->idx = idx;
-    v->gen = g_gen;
-    v->state = state;
-    v->last_use = g_tick;
+    LightLock_Lock(&g_lk);
+    g_mb_full = false;
+    LightLock_Unlock(&g_lk);
+    return true;
 }
 
 /* ---------------------------------------------------------------- drawing */
@@ -159,9 +301,15 @@ static void draw_item(const FlowItem *it, float o, float appear, u32 bg)
 
     C2D_Image img;
     img.tex = it->tex;
-    int n = (t < 0.02f) ? 1 : (int)ceilf(w / 2.0f);
+    int n = (t < 0.02f) ? 1 : (int)ceilf(w / 3.0f);
     if (n < 1) n = 1;
     float refl = REFLECT;
+
+    /* one tint for both effects: cross-fade card -> cover (fade-in) and dim toward the background */
+    float f1 = 1.0f - clampf(it->fade, 0.0f, 1.0f);
+    float tint_blend = 1.0f - (1.0f - f1) * (1.0f - dim);
+    u32 tint_col = bg;
+    if (tint_blend > 0.001f) tint_col = mix32(bg, it->color, f1 * (1.0f - dim) / tint_blend);
 
     for (int i = 0; i < n; i++) {
         float f0 = (float)i / n, f1 = (float)(i + 1) / n;
@@ -178,15 +326,15 @@ static void draw_item(const FlowItem *it, float o, float appear, u32 bg)
         img.subtex = &sub;
         p.pos.x = x0; p.pos.y = CY - h / 2; p.pos.w = (x1 - x0) + (n > 1 ? 0.6f : 0.0f); p.pos.h = h;
         p.center.x = 0; p.center.y = 0; p.depth = z; p.angle = 0;
-        C2D_PlainImageTint(&tint, bg, dim);
-        C2D_DrawImage(img, &p, dim > 0.01f ? &tint : NULL);
+        C2D_PlainImageTint(&tint, tint_col, tint_blend);
+        C2D_DrawImage(img, &p, tint_blend > 0.01f ? &tint : NULL);
 
         /* mirrored reflection fading into the background */
         float rh = h * refl;
         sub.height = (u16)rh;
         sub.top = 0.0f; sub.bottom = refl;
         p.pos.y = CY + h / 2 + 1; p.pos.h = rh; p.depth = z - 0.02f;
-        float top_b = clampf(0.62f + dim, 0.0f, 1.0f), bot_b = 1.0f;
+        float top_b = clampf(0.74f + dim, 0.0f, 1.0f), bot_b = 1.0f;
         C2D_SetImageTint(&tint, C2D_TopLeft,  bg, top_b);
         C2D_SetImageTint(&tint, C2D_TopRight, bg, top_b);
         C2D_SetImageTint(&tint, C2D_BotLeft,  bg, bot_b);

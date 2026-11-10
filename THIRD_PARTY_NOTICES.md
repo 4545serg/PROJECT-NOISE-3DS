@@ -1,6 +1,6 @@
 # Third-party software
 
-PROJECT SLITHER's own code (everything in `source/` except the three vendored
+PROJECT NOISE's own code (everything in `source/` except the three vendored
 headers below, plus `Makefile`, `tools/`, `resources/`) is MIT licensed - see `LICENSE`.
 No code was copied from other 3DS music players; the app was written against
 the libraries below.

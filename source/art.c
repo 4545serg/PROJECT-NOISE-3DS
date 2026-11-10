@@ -44,8 +44,9 @@ static void release_tex(void)
     }
 }
 
-/* Decode JPEG/PNG into a 128x128 GPU texture `tex` (caller owns / deletes it). */
-bool art_build_tex(C3D_Tex *tex, const unsigned char *data, size_t size)
+/* Pure-CPU half (safe on a worker thread): decode JPEG/PNG and box-filter it down to a 128x128
+ * RGBA8 image in the GPU's tiled layout. `out` must hold ART_SIZE * ART_SIZE * 4 bytes. */
+bool art_decode(const unsigned char *data, size_t size, unsigned char *out)
 {
     int w = 0, h = 0, c = 0;
     if (!stbi_info_from_memory(data, (int)size, &w, &h, &c)) return false;
@@ -53,12 +54,7 @@ bool art_build_tex(C3D_Tex *tex, const unsigned char *data, size_t size)
 
     unsigned char *px = stbi_load_from_memory(data, (int)size, &w, &h, &c, 4);
     if (!px) return false;
-
-    if (!C3D_TexInit(tex, ART_SIZE, ART_SIZE, GPU_RGBA8)) {
-        stbi_image_free(px);
-        return false;
-    }
-    unsigned char *dst = (unsigned char *)tex->data;
+    unsigned char *dst = out;
 
     for (int dj = 0; dj < ART_SIZE; dj++) {
         int sj = dj;                                      /* top row first: fixes upside-down cover */
@@ -93,11 +89,28 @@ bool art_build_tex(C3D_Tex *tex, const unsigned char *data, size_t size)
         }
     }
     stbi_image_free(px);
+    return true;
+}
 
+/* GPU half (main thread only): wrap a decoded image in a texture the caller owns / deletes. */
+bool art_upload(C3D_Tex *tex, const unsigned char *px)
+{
+    if (!C3D_TexInit(tex, ART_SIZE, ART_SIZE, GPU_RGBA8)) return false;
+    memcpy(tex->data, px, (size_t)ART_SIZE * ART_SIZE * 4);
     GSPGPU_FlushDataCache(tex->data, ART_SIZE * ART_SIZE * 4);
     C3D_TexSetFilter(tex, GPU_LINEAR, GPU_NEAREST);
     C3D_TexSetWrap(tex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
     return true;
+}
+
+/* Decode JPEG/PNG into a 128x128 GPU texture `tex` (caller owns / deletes it). */
+bool art_build_tex(C3D_Tex *tex, const unsigned char *data, size_t size)
+{
+    unsigned char *buf = malloc((size_t)ART_SIZE * ART_SIZE * 4);
+    if (!buf) return false;
+    bool ok = art_decode(data, size, buf) && art_upload(tex, buf);
+    free(buf);
+    return ok;
 }
 
 static bool build_texture(const unsigned char *data, size_t size)

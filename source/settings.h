@@ -14,6 +14,7 @@ typedef struct {
     int  volume;                     /* 0..100                            */
     int  eq_preset;                  /* -1 = custom, else EQ preset index */
     int  eq[EQ_BANDS];               /* band gains in dB, -12..+12        */
+    bool lid_play;                   /* keep playing when the lid is closed */
     bool shuffle;
     int  repeat;                     /* 0 = off, 1 = all, 2 = one         */
     char last_dir[512];              /* last browsed folder               */

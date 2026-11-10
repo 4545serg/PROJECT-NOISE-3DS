@@ -1,5 +1,5 @@
 #!/bin/sh
-# Downloads the three single-header libraries PROJECT SLITHER vendors at build time.
+# Downloads the three single-header libraries PROJECT NOISE vendors at build time.
 #   minimp3.h   (CC0)                   https://github.com/lieff/minimp3
 #   stb_image.h (public domain / MIT)   https://github.com/nothings/stb
 #   dr_flac.h   (public domain / MIT-0) https://github.com/mackron/dr_libs

@@ -12,7 +12,8 @@ Targets **Old 3DS / 3DS XL / 2DS** (no New 3DS features required; New 3DS simply
 ## 1. What it does
 
 **Top screen:** a Cover Flow of the album art around the highlighted song in the library
-(covers load a moment after you stop scrolling). Picking a song folds the side covers away
+(covers load on a background thread, so scrolling stays smooth, and are cached on the SD card
+in `SD:/3ds/PROJECT_NOISE/covers/` so they appear instantly next time - delete the folder to clear it). Picking a song folds the side covers away
 and leaves the now-playing view (art, title, artist, progress bar, times); scroll the list
 again and the covers fan back out. Songs without art show the animated logo cover.
 
@@ -27,7 +28,7 @@ highlighted, touch controls: previous / play-pause / next / shuffle / repeat / m
 | **D-pad Up/Down** | Move through the list (hold to scroll fast) |
 | **D-pad Left/Right** | Page up/down in the list; in settings: adjust the value |
 | **SELECT** | Open / close settings |
-| **START** | Exit |
+| **START** | Exit (asks "Exit PROJECT NOISE?" first; press START again or A on *Exit* to leave) |
 | **X / Y** | Cycle repeat (off -> all -> one) / shuffle on-off - extras |
 | **Touch** | Tap a row to open/play, drag to scroll, tap the on-screen buttons |
 
@@ -35,15 +36,15 @@ Music keeps playing while you browse folders or change settings. When a track en
 next one starts (respecting shuffle/repeat). Previous restarts the track if more than
 3 s have played.
 
-**Settings (SELECT or the menu button):** an iOS/Material-style page with three tabs.
-- **Theme** - five presets plus Background, Text, Accent and Highlight colours (per-channel R/G/B;
-  A or a tap switches channel, D-pad Left/Right or the round -/+ buttons change it).
-- **Sound** - volume slider and a **5-band equalizer** (60 Hz, 230 Hz, 910 Hz, 3.6 kHz, 14 kHz,
+**Settings (SELECT or the menu button):** three tabs.
+- **Look** - a theme preset (Noise, Emerald, Ocean, Sunset, Mono) and an accent colour swatch.
+- **Sound** - volume and a **5-band equalizer** (60 Hz, 230 Hz, 910 Hz, 3.6 kHz, 14 kHz,
   -12..+12 dB) with presets (Flat, Bass Boost, Treble, Vocal, Rock, Pop). Drag the sliders or use D-pad Left/Right.
-- **More** - close settings or exit the app.
+- **General** - **Play with lid closed** (keeps the 3DS awake so music continues when you close it;
+  uses more battery) and **Exit app** (asks for confirmation).
 
-Everything saves automatically to `SD:/3ds/PROJECT_SLITHER/settings.cfg`, along with
-shuffle, repeat, EQ and the last folder, and is restored on next launch.
+Everything saves automatically to `SD:/3ds/PROJECT_NOISE/settings.cfg`, along with
+shuffle, repeat, EQ, lid setting and the last folder, and is restored on next launch.
 
 ## 2. Putting music on the SD card
 
@@ -71,11 +72,9 @@ Tips
 
 ### A. Easiest - GitHub builds it for you (nothing to install)
 1. Create a GitHub repository and upload this whole folder (including `.github/`).
-2. Open the **Actions** tab -> *Build PROJECT SLITHER* -> it runs on every push
+2. Open the **Actions** tab -> *Build PROJECT NOISE* -> it runs on every push
    (or press *Run workflow*).
-3. Download the artifacts: `project_slither-3dsx` and `project_slither-cia`.
-   If the CIA artifact is missing, the makerom/bannertool step failed (it is
-   `continue-on-error`); the `.3dsx` is still published - see B/C to make the CIA.
+3. Download the artifacts: `PROJECT-NOISE-3DSX` (the `.3dsx` + `.smdh`). To make a CIA, see C.
 
 ### B. Locally with devkitPro
 1. Install devkitPro (https://devkitpro.org/wiki/Getting_Started) and the 3DS packages:
@@ -83,7 +82,7 @@ Tips
 2. In a devkitPro shell (MSYS2 on Windows) in this folder:
    ```
    sh tools/get_deps.sh     # downloads minimp3.h, stb_image.h and dr_flac.h (or: make deps)
-   make                     # -> project_slither.3dsx
+   make                     # -> project_noise.3dsx
    ```
    If you cannot run the script, download `minimp3.h` (lieff/minimp3), `stb_image.h`
    (nothings/stb) and `dr_flac.h` (mackron/dr_libs) into `source/` by hand.
@@ -92,7 +91,7 @@ Tips
 `make cia` needs **makerom** and **bannertool** on your PATH (prebuilt Windows/Linux
 builds are widely available; sources: 3DSGuy/Project_CTR and Steveice10/bannertool). Then:
 ```
-make cia                 # -> project_slither.cia
+make cia                 # -> project_noise.cia
 ```
 `resources/app.rsf` holds the title ID (`0x7C531`), 64 MB application memory (Old 3DS
 compatible) and the `dsp::DSP` service the audio needs. Change `UniqueId` if it clashes
@@ -100,11 +99,11 @@ with another title you have installed.
 
 ## 4. Installing
 
-- **3DSX (testing):** copy `project_slither.3dsx` (and the `.smdh`) to `SD:/3ds/` and launch
+- **3DSX (testing):** copy `project_noise.3dsx` (and the `.smdh`) to `SD:/3ds/` and launch
   from the Homebrew Launcher.
-- **CIA:** copy `project_slither.cia` anywhere on the SD card (e.g. `SD:/cias/`), open
+- **CIA:** copy `project_noise.cia` anywhere on the SD card (e.g. `SD:/cias/`), open
   **FBI** -> *SD* -> select the file -> *Install CIA* (then *Delete* the file if you like).
-  The app appears on the HOME Menu as PROJECT SLITHER.
+  The app appears on the HOME Menu as PROJECT NOISE.
 
 ## 5. Troubleshooting
 
@@ -122,7 +121,8 @@ with another title you have installed.
 source/main.c      UI, input, playlist logic, settings page
 source/audio.c     minimp3 / dr_flac / WAV decode thread -> ndsp channel 0, position tracking
 source/meta.c      ID3v2/v1 parsing, artwork extraction, duration probe
-source/art.c       JPEG/PNG -> 128x128 tiled GPU texture
+source/art.c       JPEG/PNG -> 128x128 tiled GPU texture (decode + upload split)
+source/flow.c      Cover Flow: perspective drawing, background cover loader, SD thumbnail cache
 source/browser.c   folder listing / sorting
 source/settings.c  theme + preferences, autosave file
 resources/         app.rsf, icon, banner (generated by tools/make_assets.py)

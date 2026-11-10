@@ -1,7 +1,7 @@
-# PROJECT NOISE - Nintendo 3DS MP3 player
+# PROJECT NOISE - Nintendo 3DS music player
 # make      -> project_noise.3dsx
 # make cia  -> project_noise.cia
-# make deps -> fetch MP3/image decoder headers
+# make deps -> fetch MP3/FLAC/image decoder headers
 
 ifeq ($(strip $(DEVKITPRO)),)
 $(error "DEVKITPRO is not set. Install devkitPro and set DEVKITPRO")
@@ -13,7 +13,7 @@ export PATH := $(DEVKITPRO)/tools/bin:$(DEVKITARM)/bin:$(PATH)
 TARGET := project_noise
 BUILD := build
 APP_TITLE := PROJECT NOISE
-APP_DESC := Native MP3 music player
+APP_DESC := Native music player
 APP_AUTHOR := PROJECT NOISE
 
 ICON := resources/icon.png

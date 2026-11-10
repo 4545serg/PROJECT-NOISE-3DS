@@ -4,20 +4,20 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include "slither.h"
+#include "noise.h"
 
 typedef struct { const char *name; u32 bg, text, accent, select; } Preset;
 
 static const Preset presets[PRESET_COUNT] = {
-    { "Noise",   0x101114, 0xF2F2F4, 0x35D07F, 0x292C32 },
-    { "Midnight",0x0D1020, 0xE8EAF6, 0x7C8CFF, 0x26305F },
+    { "Noise",   0x0B0D12, 0xF4F6FA, 0x3D9CFF, 0x1C2431 },
+    { "Emerald", 0x0A1410, 0xE8F6EE, 0x35D07F, 0x1B3A2C },
     { "Ocean",   0x0B1720, 0xE8F4F8, 0x39B8D6, 0x183A49 },
     { "Sunset",  0x1F0E14, 0xFFEFE6, 0xFF7A45, 0x5A2431 },
     { "Mono",    0x101010, 0xEEEEEE, 0xFFFFFF, 0x3A3A3A }
 };
 
 const char *PRESET_NAMES[PRESET_COUNT] = {
-    "Noise", "Midnight", "Ocean", "Sunset", "Mono"
+    "Noise", "Emerald", "Ocean", "Sunset", "Mono"
 };
 
 static const int eq_presets[EQ_PRESET_COUNT][EQ_BANDS] = {
@@ -111,6 +111,8 @@ void settings_load(Settings *s)
             if (sscanf(value, "%d,%d,%d,%d,%d", &g[0], &g[1], &g[2], &g[3], &g[4]) == EQ_BANDS)
                 for (int i = 0; i < EQ_BANDS; i++) s->eq[i] = g[i];
         }
+        else if (!strcmp(key, "lid_play"))
+            s->lid_play = atoi(value) != 0;
         else if (!strcmp(key, "shuffle"))
             s->shuffle = atoi(value) != 0;
         else if (!strcmp(key, "repeat") && sscanf(value, "%d", (int *)&parsed) == 1)
@@ -147,6 +149,7 @@ bool settings_save(const Settings *s)
     fprintf(f, "volume=%d\n", s->volume);
     fprintf(f, "eq_preset=%d\n", s->eq_preset);
     fprintf(f, "eq=%d,%d,%d,%d,%d\n", s->eq[0], s->eq[1], s->eq[2], s->eq[3], s->eq[4]);
+    fprintf(f, "lid_play=%d\n", s->lid_play ? 1 : 0);
     fprintf(f, "shuffle=%d\n", s->shuffle ? 1 : 0);
     fprintf(f, "repeat=%d\n", s->repeat);
     fprintf(f, "last_dir=%s\n", s->last_dir);

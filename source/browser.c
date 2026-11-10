@@ -6,7 +6,7 @@
 #include <string.h>
 #include <strings.h>
 
-#include "slither.h"
+#include "noise.h"
 
 #define MAX_ENTRIES 2000
 
