@@ -33,11 +33,18 @@ const char *EQ_PRESET_NAMES[EQ_PRESET_COUNT] = {
     "Flat", "Bass Boost", "Treble", "Vocal", "Rock", "Pop"
 };
 
+void settings_eq_refresh(Settings *s)
+{
+    if (s->eq_preset < 0 || s->eq_preset >= EQ_PRESET_COUNT) s->eq_preset = 0;
+    for (int i = 0; i < EQ_BANDS; i++)
+        s->eq[i] = s->eq_manual ? s->eq_user[i] : eq_presets[s->eq_preset][i];
+}
+
 void settings_apply_eq_preset(Settings *s, int idx)
 {
     if (idx < 0 || idx >= EQ_PRESET_COUNT) return;
-    for (int i = 0; i < EQ_BANDS; i++) s->eq[i] = eq_presets[idx][i];
     s->eq_preset = idx;
+    settings_eq_refresh(s);
 }
 
 static Rgb from_hex(u32 value)
@@ -106,13 +113,21 @@ void settings_load(Settings *s)
             s->volume = (int)parsed;
         else if (!strcmp(key, "eq_preset") && sscanf(value, "%d", (int *)&parsed) == 1)
             s->eq_preset = (int)parsed;
-        else if (!strcmp(key, "eq")) {
+        else if (!strcmp(key, "eq_user") || !strcmp(key, "eq")) {      /* "eq" = older settings files */
             int g[EQ_BANDS];
             if (sscanf(value, "%d,%d,%d,%d,%d", &g[0], &g[1], &g[2], &g[3], &g[4]) == EQ_BANDS)
-                for (int i = 0; i < EQ_BANDS; i++) s->eq[i] = g[i];
+                for (int i = 0; i < EQ_BANDS; i++) s->eq_user[i] = g[i];
         }
+        else if (!strcmp(key, "eq_manual"))
+            s->eq_manual = atoi(value) != 0;
         else if (!strcmp(key, "lid_play"))
             s->lid_play = atoi(value) != 0;
+        else if (!strcmp(key, "clock_mode"))
+            s->clock_mode = atoi(value);
+        else if (!strcmp(key, "show_batt"))
+            s->show_batt = atoi(value) != 0;
+        else if (!strcmp(key, "setup_done"))
+            s->setup_done = atoi(value) != 0;
         else if (!strcmp(key, "shuffle"))
             s->shuffle = atoi(value) != 0;
         else if (!strcmp(key, "repeat") && sscanf(value, "%d", (int *)&parsed) == 1)
@@ -126,11 +141,14 @@ void settings_load(Settings *s)
     if (s->volume < 0) s->volume = 0;
     if (s->volume > 100) s->volume = 100;
     if (s->repeat < 0 || s->repeat > 2) s->repeat = 1;
-    if (s->eq_preset < -1 || s->eq_preset >= EQ_PRESET_COUNT) s->eq_preset = -1;
+    if (s->clock_mode < 0 || s->clock_mode > 2) s->clock_mode = 0;
+    if (s->eq_preset < 0) { s->eq_manual = true; s->eq_preset = 0; }   /* older files: "custom" = manual */
+    if (s->eq_preset >= EQ_PRESET_COUNT) s->eq_preset = 0;
     for (int i = 0; i < EQ_BANDS; i++) {
-        if (s->eq[i] < -12) s->eq[i] = -12;
-        if (s->eq[i] > 12) s->eq[i] = 12;
+        if (s->eq_user[i] < -12) s->eq_user[i] = -12;
+        if (s->eq_user[i] > 12) s->eq_user[i] = 12;
     }
+    settings_eq_refresh(s);
     if (s->preset < -1 || s->preset >= PRESET_COUNT) s->preset = -1;
 }
 
@@ -148,8 +166,12 @@ bool settings_save(const Settings *s)
     fprintf(f, "preset=%d\n", s->preset);
     fprintf(f, "volume=%d\n", s->volume);
     fprintf(f, "eq_preset=%d\n", s->eq_preset);
-    fprintf(f, "eq=%d,%d,%d,%d,%d\n", s->eq[0], s->eq[1], s->eq[2], s->eq[3], s->eq[4]);
+    fprintf(f, "eq_manual=%d\n", s->eq_manual ? 1 : 0);
+    fprintf(f, "eq_user=%d,%d,%d,%d,%d\n", s->eq_user[0], s->eq_user[1], s->eq_user[2], s->eq_user[3], s->eq_user[4]);
     fprintf(f, "lid_play=%d\n", s->lid_play ? 1 : 0);
+    fprintf(f, "clock_mode=%d\n", s->clock_mode);
+    fprintf(f, "show_batt=%d\n", s->show_batt ? 1 : 0);
+    fprintf(f, "setup_done=%d\n", s->setup_done ? 1 : 0);
     fprintf(f, "shuffle=%d\n", s->shuffle ? 1 : 0);
     fprintf(f, "repeat=%d\n", s->repeat);
     fprintf(f, "last_dir=%s\n", s->last_dir);

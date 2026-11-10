@@ -22,3 +22,7 @@ void dir_free(DirList *d);
 /* Copies only the files (no folders) of src into dst, including the dir. */
 void dir_copy_files(DirList *dst, const DirList *src);
 bool is_music_root(const char *dir);
+/* Appends one entry (name is copied). Returns false when the list is full or out of memory. */
+bool dir_add(DirList *d, const char *name, bool is_dir);
+/* true for .mp3 / .wav / .flac file names */
+bool is_audio_file(const char *name);

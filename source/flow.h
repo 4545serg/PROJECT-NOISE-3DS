@@ -8,7 +8,7 @@
  * Covers are loaded on a background thread (tags + JPEG/PNG decode, with an on-disk thumbnail
  * cache in SD:/3ds/PROJECT_NOISE/covers) and uploaded to the GPU one per frame, so scrolling
  * never waits for a decode. Cache entries are keyed by the entry's index in the current listing. */
-#define FLOW_SIDE     4        /* covers shown on each side of the centre */
+#define FLOW_SIDE     3        /* covers shown on each side of the centre */
 #define FLOW_MAX_WANT 16
 
 typedef struct {

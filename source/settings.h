@@ -12,9 +12,14 @@ typedef struct {
     Rgb  bg, text, accent, select;   /* theme colours                     */
     int  preset;                     /* -1 = custom, else preset index    */
     int  volume;                     /* 0..100                            */
-    int  eq_preset;                  /* -1 = custom, else EQ preset index */
-    int  eq[EQ_BANDS];               /* band gains in dB, -12..+12        */
+    int  eq_preset;                  /* chosen EQ preset index (used while manual EQ is off) */
+    bool eq_manual;                  /* true: use the user's own band gains instead of the preset */
+    int  eq_user[EQ_BANDS];          /* the user's manual band gains, -12..+12 dB */
+    int  eq[EQ_BANDS];               /* ACTIVE gains (derived: user's or preset's) - what the audio engine gets */
     bool lid_play;                   /* keep playing when the lid is closed */
+    int  clock_mode;                 /* top-screen clock: 0 = off, 1 = 12-hour, 2 = 24-hour */
+    bool show_batt;                  /* top-screen battery percentage */
+    bool setup_done;                 /* first-run setup + guide has been completed */
     bool shuffle;
     int  repeat;                     /* 0 = off, 1 = all, 2 = one         */
     char last_dir[512];              /* last browsed folder               */
@@ -26,6 +31,7 @@ extern const char *PRESET_NAMES[PRESET_COUNT];
 #define EQ_PRESET_COUNT 6
 extern const char *EQ_PRESET_NAMES[EQ_PRESET_COUNT];
 void settings_apply_eq_preset(Settings *s, int idx);
+void settings_eq_refresh(Settings *s);        /* recompute s->eq from eq_manual / eq_user / eq_preset */
 
 void settings_defaults(Settings *s);
 void settings_apply_preset(Settings *s, int idx);

@@ -36,6 +36,10 @@ static bool add_entry(DirList *d, const char *name, bool is_dir)
     return true;
 }
 
+bool is_audio_file(const char *name) { return has_audio_ext(name); }
+
+bool dir_add(DirList *d, const char *name, bool is_dir) { return add_entry(d, name, is_dir); }
+
 static int cmp_entry(const void *a, const void *b)
 {
     const Entry *x = a, *y = b;

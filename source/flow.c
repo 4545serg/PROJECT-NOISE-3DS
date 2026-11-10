@@ -15,11 +15,11 @@
 #define COVER_DIR  DATA_DIR "/covers"
 #define CACHE_MAGIC 0x31435A4Eu          /* "NZC1" */
 #define CX        200.0f       /* screen-space centre of the flow (top screen is 400 wide) */
-#define CY        72.0f        /* vertical centre of the covers (cover is 128 tall at y=8) */
-#define FACE      128.0f       /* face-on cover size */
-#define SIDE_W    40.0f        /* on-screen width of a turned cover */
+#define CY        94.0f        /* vertical centre of the covers (cover is 144 tall at y=22) */
+#define FACE      144.0f       /* face-on cover size */
+#define SIDE_W    44.0f        /* on-screen width of a turned cover */
 #define INNER_GAP 6.0f         /* gap between the centre cover and the first side cover */
-#define STEP      28.0f        /* spacing of the side covers */
+#define STEP      30.0f        /* spacing of the side covers */
 #define REFLECT   0.18f        /* reflection height as a fraction of the cover */
 #define FADE_FRAMES 10.0f
 
@@ -279,7 +279,7 @@ static void draw_item(const FlowItem *it, float o, float appear, u32 bg)
     float hl = (s < 0) ? ho : hi;                        /* left edge height  */
     float hr = (s < 0) ? hi : ho;                        /* right edge height */
 
-    float fade = clampf((ao - 3.2f) / 1.3f, 0.0f, 1.0f);
+    float fade = clampf((ao - 2.2f) / 1.3f, 0.0f, 1.0f);
     float dim  = clampf(0.30f * t + fade + (1.0f - appear), 0.0f, 1.0f);   /* blend toward bg */
     float z = 0.30f + (6.0f - fminf(ao, 6.0f)) * 0.012f;
 
