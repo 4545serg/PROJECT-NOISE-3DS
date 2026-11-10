@@ -4,7 +4,7 @@
 
 ### Added
 - **Up Next screen**: the mini-player queue button opens a dedicated queue view with song titles, folder context, immediate play, per-item removal and clear-all controls.
-- **Manual play queue**: press ZR on a selected song to enqueue it; queued songs play before the current folder playlist continues.
+- **Manual play queue**: press Y on a selected song to add it to the end of Up Next, or X to prioritize it as the next track; queue-screen X/Y shortcuts are non-destructive.
 - **Sleep timer** (5 / 10 / 15 / 30 / 45 / 60 minutes) in Settings > General, with a live countdown, start/reset and cancel controls.
 - **Favorites** library section with per-song heart toggles; favorites persist on SD and can be shuffled as a playlist.
 - **Cover fade** setting (Quick / Smooth / Slow, Settings > Appearance): the now-playing cover and glow fade in softly when a song starts.

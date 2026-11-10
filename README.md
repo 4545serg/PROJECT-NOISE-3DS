@@ -35,19 +35,19 @@ either side of the transport buttons and light up, with a dot underneath, when o
 | **D-pad Up/Down** | Move through the list (hold to scroll fast) |
 | **SELECT** | Open / close settings |
 | **START** | Exit (asks "Exit PROJECT NOISE?" first; press START again or A on *Exit* to leave) |
-| **X** | Search (opens the on-screen keyboard) |
-| **Y** | Shuffle on / off (repeat: tap the repeat button on the touch screen) |
-| **ZR** | Add the selected song to the play queue; queued songs play before the folder playlist advances |
+| **X** | Add the selected song to the front of Up Next (play next) |
+| **Y** | Add the selected song to the end of Up Next |
+| **Search** | Tap the Search songs bar to open the on-screen keyboard |
 | **ZL** | Favorite / unfavorite the selected song |
 | **Touch** | Tap a row to open/play, drag to scroll, tap the search bar, transport controls or the Up Next button |
 
 Music keeps playing while you browse folders or change settings. When a track ends the
 next one starts (respecting shuffle/repeat). The on-screen previous / next buttons change track; previous restarts the track if more than
-3 s have played. Press **ZR** on a highlighted song to add it to the manual queue. Tap the queue icon at the right of the mini-player to open **Up Next**; tap an item or press A to play it immediately, tap its × / press X to remove it, and press Y to clear the queue. The queue screen keeps the mini-player available.
+3 s have played. Press **Y** on a highlighted song to add it to the end of Up Next, or **X** to place it at the front so it plays next. Tap the queue icon at the right of the mini-player to open **Up Next**; tap an item or press A to play it immediately. Tap the × on a row to remove it. The queue screen keeps the mini-player available; X and Y have no destructive actions there.
 
 ### Searching
 
-Tap the **Search songs** bar (or press **X**) and type with the 3DS keyboard. The search covers **every song under
+Tap the **Search songs** bar and type with the 3DS keyboard. The search covers **every song under
 `SD:/Music/`, including all sub-folders**, and matches against file and folder names, ignoring case; every word you type
 has to match, so `daft punk` finds `Daft Punk/Discovery/01 One More Time.mp3` and `radio ok` finds the OK Computer tracks.
 Songs whose own file name matches are listed first. The result list works like any folder: tap or press A to play, the

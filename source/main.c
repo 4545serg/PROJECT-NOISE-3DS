@@ -339,19 +339,38 @@ static void play_manual_queue_head(void)
     if (audio_ok) { audio_play(path, m.audio_start); apply_lid(); }
 }
 
-static void queue_add_from_list(int row)
+static void queue_add_from_list(int row, bool play_next)
 {
     if (row < 0 || row >= L.n || L.e[row].is_dir) return;
-    if (manual_queue_count >= MANUAL_QUEUE_LIMIT) { toast("Queue is full"); return; }
     char path[512];
     snprintf(path, sizeof path, "%s%s", L.dir, L.e[row].name);
     if (strlen(path) >= sizeof manual_queue[0]) { toast("File path is too long"); return; }
+
+    /* Re-adding an existing item moves it instead of creating a duplicate. */
+    int existing = -1;
     for (int i = 0; i < manual_queue_count; i++)
-        if (!strcmp(manual_queue[i], path)) { toast("Already in queue"); return; }
-    snprintf(manual_queue[manual_queue_count++], sizeof manual_queue[0], "%s", path);
-    char msg[48];
-    snprintf(msg, sizeof msg, "Added to queue (%d)", manual_queue_count);
-    toast(msg);
+        if (!strcmp(manual_queue[i], path)) { existing = i; break; }
+    if (existing >= 0) {
+        if (play_next && existing > 0) {
+            char saved[512];
+            snprintf(saved, sizeof saved, "%s", manual_queue[existing]);
+            memmove(&manual_queue[1], &manual_queue[0], (size_t)existing * sizeof manual_queue[0]);
+            snprintf(manual_queue[0], sizeof manual_queue[0], "%s", saved);
+        } else {
+            toast(play_next ? "Already next" : "Already queued");
+            return;
+        }
+    } else {
+        if (manual_queue_count >= MANUAL_QUEUE_LIMIT) { toast("Queue is full"); return; }
+        if (play_next) {
+            memmove(&manual_queue[1], &manual_queue[0], (size_t)manual_queue_count * sizeof manual_queue[0]);
+            snprintf(manual_queue[0], sizeof manual_queue[0], "%s", path);
+            manual_queue_count++;
+        } else {
+            snprintf(manual_queue[manual_queue_count++], sizeof manual_queue[0], "%s", path);
+        }
+    }
+    toast(play_next ? "Added to play next" : "Added to queue");
     if (!audio_is_active()) play_manual_queue_head();
 }
 
@@ -1358,10 +1377,12 @@ static void draw_queue(void)
     draw_text("Done", 286, 10, 0.42f, C(S.bg), C2D_AlignCenter, 0);
 
     if (manual_queue_count == 0) {
-        C2D_DrawCircleSolid(160, 100, 0.30f, 25, cSel);
-        icon_note(153, 92, cDim);
-        draw_text("Your queue is empty", 160, 135, 0.58f, cText, C2D_AlignCenter, 280);
-        draw_text("Select a song and press ZR to add it", 160, 158, 0.40f, cDim, C2D_AlignCenter, 292);
+        rrect(18, 54, 284, 112, 12, 0.28f, cCard);
+        C2D_DrawCircleSolid(160, 86, 0.30f, 19, cSel);
+        icon_note(153, 78, cAcc);
+        draw_text("Nothing queued yet", 160, 116, 0.56f, cText, C2D_AlignCenter, 270);
+        draw_text("Browse your music and press Y to add a song", 160, 139, 0.37f, cDim, C2D_AlignCenter, 270);
+        draw_text("Press X to put it at the front of Up Next", 160, 153, 0.34f, cDim, C2D_AlignCenter, 270);
     } else {
         const int visible = 4;
         if (queue_sel < queue_scroll) queue_scroll = queue_sel;
@@ -1391,7 +1412,7 @@ static void draw_queue(void)
             draw_text("×", 296, y + 6, 0.58f, cDim, C2D_AlignCenter, 0);
         }
     }
-    draw_text("A Play     X Remove     Y Clear     B Close", 160, 181, 0.34f, cDim, C2D_AlignCenter, 300);
+    /* Keep the queue view calm: no destructive X/Y shortcuts or footer crowding. */
     draw_miniplayer();
 }
 
@@ -1754,7 +1775,7 @@ static void draw_wizard_top(void)         /* welcome and controls pages (the set
         wz_line("L / R",  "Previous / next song",             94,  cAcc, cText);
         wz_line("D-pad",  skip,                               116, cAcc, cText);
         wz_line("",       "Up / Down: move through the list", 138, cAcc, cText);
-        wz_line("X / Y / ZR",  "Search / Shuffle / Add to queue",                 160, cAcc, cText);
+        wz_line("X / Y",  "Play next / Add to queue",                            160, cAcc, cText);
         wz_line("SELECT", "Open Settings",                    182, cAcc, cText);
         wz_line("START",  "Exit the app",                     204, cAcc, cText);
     }
@@ -2119,8 +2140,7 @@ int main(void)
                 if (repeat_fire(kh, KEY_DUP, &hold_up)) { if (queue_sel > 0) queue_sel--; }
                 if (repeat_fire(kh, KEY_DDOWN, &hold_down)) { if (queue_sel < manual_queue_count - 1) queue_sel++; }
                 if (kd & KEY_A) queue_play_at(queue_sel);
-                if (kd & KEY_X) queue_remove_at(queue_sel);
-                if (kd & KEY_Y) { manual_queue_count = 0; queue_sel = queue_scroll = 0; toast("Queue cleared"); }
+                /* X and Y are intentionally not destructive inside Up Next. */
             }
         } else if (settings_open) {
             if (kd & (KEY_SELECT | KEY_B)) close_settings();
@@ -2169,9 +2189,8 @@ int main(void)
                 else if (!audio_is_active()) toggle_play();
             }
             if ((kd & KEY_B) && audio_is_active() && !audio_is_paused()) { audio_pause(); apply_lid(); }
-            if (kd & KEY_X) open_search();
-            if (kd & KEY_Y) { S.shuffle = !S.shuffle; mark_dirty(); }
-            if ((kd & KEY_ZR) && sel < L.n && !L.e[sel].is_dir) queue_add_from_list(sel);
+            if ((kd & KEY_X) && sel < L.n && !L.e[sel].is_dir) queue_add_from_list(sel, true);
+            if ((kd & KEY_Y) && sel < L.n && !L.e[sel].is_dir) queue_add_from_list(sel, false);
             if ((kd & KEY_ZL) && sel < L.n && !L.e[sel].is_dir) { char fp[256]; entry_relative_path(&L.e[sel], fp, sizeof fp); favorite_toggle(fp); }
 
             if (repeat_fire(kh, KEY_DUP, &hold_up))     move_sel(-1);
