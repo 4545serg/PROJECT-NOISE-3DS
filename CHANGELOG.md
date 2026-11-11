@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Changed (UI, round 3)
+- **Top screen lighting**: the ambient glow was not actually being drawn on the redesigned top screen. It is now
+  rendered behind everything, tinted by the album art, and gently breathes with the bass. The screen outline is
+  drawn as a thin ring so the glow shows through to the edges.
+- Top screen: taller header, larger song title / artist (and times), clock shows the time only (no date).
+- Bottom screen: three larger song rows (bigger title / artist / duration), a cleaner heart (even outline), and a
+  Now Playing capsule with a bigger title and the artist underneath.
+- A spinning **CD** replaces the equalizer icon next to the song title (top panel and bottom Now Playing); it
+  spins while music plays and stops when paused.
+- **Visualizer** (Settings > Appearance > Visualizer: Cover / Spectrum / Waveform / Orbit) now reacts to the audio
+  actually playing: the audio thread analyses each decoded chunk (12 bands + waveform) and the UI reads the chunk
+  that is playing right now.
+
+### Fixed
+- Status toasts ("Added to play next", "Already next", ...) no longer show list text through the pill (text is
+  drawn at a higher depth than the pill while a toast is up).
+- Previous track: pressing it after a few seconds now restarts the song that is actually playing (even one from
+  Up Next); right after a queued song it returns to the song it interrupted.
+
 ### Changed (UI, round 2)
 - Bottom screen: Home and the header "Liked Songs" button are gone; the tabs are now the top row and the
   search bar sits full-width underneath them. "Playlists" is now **Queue** (opens Up Next).

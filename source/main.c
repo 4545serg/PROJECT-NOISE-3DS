@@ -27,8 +27,8 @@
 
 /* ---------------------------------------------------------------- layout */
 #define LIST_TOP   66          /* song list: 4 rows of ROW_H, scrollbar column on the right */
-#define ROW_H      31
-#define VIS_ROWS   4
+#define ROW_H      42
+#define VIS_ROWS   3
 #define CTRL_TOP   194         /* now-playing deck: Now Playing | transport | volume */
 #define SL_X0      14          /* seek line inside the Now Playing capsule, x range */
 #define SL_X1      112
@@ -74,7 +74,7 @@ static const char *PAGE_NAMES[3]         = { "Appearance", "Audio", "General" };
 #define SCR_H   240
 
 /* ambient glow: how strongly the cover colour tints the top screen, and how far it reaches */
-static const float GLOW_STRENGTH[GLOW_COUNT] = { 0.0f, 0.34f, 0.58f };
+static const float GLOW_STRENGTH[GLOW_COUNT] = { 0.0f, 0.30f, 0.50f };
 #define GLOW_CORE   62.0f      /* half-size of the fully-lit core around the centre cover */
 #define GLOW_REACH  190.0f     /* distance from that core at which the glow has faded out */
 
@@ -83,6 +83,7 @@ static Settings  S;
 static DirList   L;                 /* folder shown in the browser          */
 static DirList   Q;                 /* playlist: files of the folder played */
 static int       qi = -1;           /* current index in Q                   */
+static bool      cur_from_queue = false;   /* the loaded track came from Up Next, not from Q */
 static int       sel = 0, scroll_top = 0;
 
 /* song search: L (or Q) holds search results instead of a folder's contents */
@@ -158,7 +159,7 @@ static const char *WZ_TITLE[WZ_N] = { "Welcome", "Make it yours", "Controls" };
 static bool      mcu_ok = false, ptm_ok = false;
 static int       batt_pct = -1, batt_timer = 0;
 static bool      batt_chg = false;
-static char      toast_msg[24];
+static char      toast_msg[32];
 static int       toast_t = 0;
 static int       ctrl_flash_t = 0;  /* press highlight on a transport button: frames left + its x */
 static float     ctrl_flash_x = 0.0f;
@@ -172,6 +173,25 @@ static void      favorites_save(void);
 static bool      audio_ok = false;
 static C2D_TextBuf tbuf;
 static float     eq_phase = 0.0f;      /* drives the equalizer bars */
+static float     cd_phase = 0.0f;      /* spinning CD angle (advances while playing) */
+static float     text_z = 0.5f;        /* depth of draw_text(); raised briefly for overlays such as the toast */
+static float     vis_band[AUDIO_VIS_BANDS], vis_peak[AUDIO_VIS_BANDS], vis_wave[AUDIO_VIS_WAVE];
+static float     vis_bass = 0.0f;      /* smoothed low-end level 0..1, also pulses the ambient glow */
+
+/* once per frame: pull the analysis of the chunk that is playing right now and smooth it (fast attack, slow release) */
+static void vis_update(void)
+{
+    float b[AUDIO_VIS_BANDS], w[AUDIO_VIS_WAVE];
+    const bool live = audio_ok && audio_get_vis(b, w);
+    for (int i = 0; i < AUDIO_VIS_BANDS; i++) {
+        const float t = live ? b[i] : 0.0f;
+        vis_band[i] += (t - vis_band[i]) * (t > vis_band[i] ? 0.65f : 0.13f);
+        vis_peak[i] -= 0.010f;
+        if (vis_peak[i] < vis_band[i]) vis_peak[i] = vis_band[i];
+    }
+    for (int k = 0; k < AUDIO_VIS_WAVE; k++) vis_wave[k] += ((live ? w[k] : 0.0f) - vis_wave[k]) * 0.5f;
+    vis_bass += (((vis_band[0] + vis_band[1] + vis_band[2]) / 3.0f) - vis_bass) * 0.25f;
+}
 static bool      quit_req = false;
 static char      cur_path[800];
 static bool      slider_drag = false;
@@ -198,11 +218,12 @@ static Rgb bg_at(float y)                         /* background colour at screen
     return mix_rgb(lit, S.bg, (int)(255.0f * y / (float)SCR_H));
 }
 
-static void bg_gradient(float w)
+static void bg_gradient_z(float w, float z)
 {
     u32 t = C(bg_at(0)), b = C(bg_at((float)SCR_H));
-    C2D_DrawRectangle(0, 0, 0.05f, w, (float)SCR_H, t, t, b, b);
+    C2D_DrawRectangle(0, 0, z, w, (float)SCR_H, t, t, b, b);
 }
+static void bg_gradient(float w) { bg_gradient_z(w, 0.05f); }
 
 /* Ambient glow: the top-screen background, tinted with the cover's colour. The tint is strongest right
  * around the centre cover and fades smoothly to the plain background, so it never forms a visible box. */
@@ -232,7 +253,7 @@ static const float GLOW_YS[GLOW_BANDS + 1] = { 0, 22, 58, 94, 130, 166, 200, SCR
 
 static void top_background(void)
 {
-    if (amb_k < 0.004f) { bg_gradient(TOP_W); return; }        /* glow off: the plain gradient */
+    if (amb_k < 0.004f) { bg_gradient_z(TOP_W, 0.02f); return; }        /* glow off: the plain gradient */
 
     static u32 mesh[(GLOW_BANDS + 1) * (GLOW_COLS + 1)];
     static u8  key[10];
@@ -247,7 +268,7 @@ static void top_background(void)
     for (int yi = 0; yi < GLOW_BANDS; yi++) {
         for (int xi = 0; xi < GLOW_COLS; xi++) {
             const u32 *a = &mesh[yi * (GLOW_COLS + 1) + xi], *b = a + (GLOW_COLS + 1);
-            C2D_DrawRectangle((float)xi * 20.0f, GLOW_YS[yi], 0.05f, 20.0f, GLOW_YS[yi + 1] - GLOW_YS[yi],
+            C2D_DrawRectangle((float)xi * 20.0f, GLOW_YS[yi], 0.02f, 20.0f, GLOW_YS[yi + 1] - GLOW_YS[yi],
                               a[0], a[1], b[0], b[1]);
         }
     }
@@ -275,7 +296,7 @@ static void draw_text(const char *s, float x, float y, float sc, u32 color, u32 
         C2D_TextParse(&t, tbuf, tmp);
     }
     C2D_TextOptimize(&t);
-    C2D_DrawText(&t, C2D_WithColor | align, x, y, 0.5f, sc, sc, color);
+    C2D_DrawText(&t, C2D_WithColor | align, x, y, text_z, sc, sc, color);
 }
 
 static void draw_text_sh(const char *s, float x, float y, float sc, u32 color, u32 align, float maxw)
@@ -296,6 +317,7 @@ static void play_q(int idx)
 {
     if (idx < 0 || idx >= Q.n) return;
     qi = idx;
+    cur_from_queue = false;
 
     char path[800];
     snprintf(path, sizeof path, "%s%s", Q.dir, Q.e[idx].name);
@@ -340,6 +362,7 @@ static void play_manual_queue_head(void)
     }
     cur = m;
     track_loaded = true;
+    cur_from_queue = true;
     snprintf(cur_path, sizeof cur_path, "%s", path);
     art_queue(art, art_size);
     if (audio_ok) { audio_play(path, m.audio_start); apply_lid(); }
@@ -418,6 +441,7 @@ static void queue_play_at(int index)
     }
     cur = m;
     track_loaded = true;
+    cur_from_queue = true;
     snprintf(cur_path, sizeof cur_path, "%s", path);
     art_queue(art, art_size);
     flow_show = false;
@@ -486,8 +510,12 @@ static void next_track(bool manual)
 
 static void prev_track(void)
 {
+    if (!track_loaded) return;
+    /* past the first seconds: restart what is playing (even if it came from Up Next) */
+    if (audio_is_active() && audio_position_ms() > 3000) { replay_current(); return; }
+    /* a queued song was interrupting the playlist: "previous" goes back to the song it interrupted */
+    if (cur_from_queue && qi >= 0 && qi < Q.n) { play_q(qi); return; }
     if (Q.n == 0) return;
-    if (audio_is_active() && audio_position_ms() > 3000) { play_q(qi); return; }
     int n;
     if (S.shuffle && Q.n > 1) {
         do { n = rand() % Q.n; } while (n == qi);
@@ -503,7 +531,7 @@ static void follow_playing(void);
 
 static void flash_ctrl(float x) { ctrl_flash_x = x; ctrl_flash_t = CTRL_FLASH_FRAMES; }
 static void skip_next(void) { if (Q.n == 0 && manual_queue_count == 0) return; flash_ctrl(208); flow_show = false; next_track(true); follow_playing(); }
-static void skip_prev(void) { if (Q.n == 0) return; flash_ctrl(156); flow_show = false; prev_track(); follow_playing(); }
+static void skip_prev(void) { if (Q.n == 0 && !track_loaded) return; flash_ctrl(156); flow_show = false; prev_track(); follow_playing(); }
 
 static void toggle_play(void)
 {
@@ -958,7 +986,7 @@ static void ambient_update(float dt)
     if (!have) rgb = ((u32)S.accent.r << 16) | ((u32)S.accent.g << 8) | S.accent.b;
 
     float tr = (float)((rgb >> 16) & 0xFF), tg = (float)((rgb >> 8) & 0xFF), tb = (float)(rgb & 0xFF);
-    float tk = GLOW_STRENGTH[S.glow];
+    float tk = GLOW_STRENGTH[S.glow] * (1.0f + 0.30f * vis_bass);   /* breathes with the low end */
     if (!amb_init) { amb_r = tr; amb_g = tg; amb_b = tb; amb_k = tk; amb_init = true; return; }
 
     float a = 1.0f - expf(-dt * (browsing ? 3.6f : 2.4f));   /* slow, soft settle (~1 s) on a new cover */
@@ -1106,6 +1134,52 @@ static void neon_frame(float w, float h, float z)
     rrect(3, 3, w - 6, h - 6, 14, z + 0.004f, C(S.bg));
 }
 
+/* Outline only (no fill) around a whole screen, so whatever is drawn behind it - the ambient glow - shows through. */
+static void ring_path(float w, float h, float mg, float R, float th, u32 c, float z)
+{
+    const float x0 = mg, y0 = mg, x1 = w - mg, y1 = h - mg;
+    C2D_DrawLine(x0 + R, y0, c, x1 - R, y0, c, th, z);
+    C2D_DrawLine(x0 + R, y1, c, x1 - R, y1, c, th, z);
+    C2D_DrawLine(x0, y0 + R, c, x0, y1 - R, c, th, z);
+    C2D_DrawLine(x1, y0 + R, c, x1, y1 - R, c, th, z);
+    const float ccx[4] = { x0 + R, x1 - R, x1 - R, x0 + R }, ccy[4] = { y0 + R, y0 + R, y1 - R, y1 - R };
+    const float a_start[4] = { 3.14159f, 4.71239f, 0.0f, 1.5708f };
+    for (int q = 0; q < 4; q++) {
+        for (int i = 0; i < 6; i++) {
+            const float a0 = a_start[q] + (float)i * 0.261799f, a1 = a0 + 0.261799f;
+            C2D_DrawLine(ccx[q] + cosf(a0) * R, ccy[q] + sinf(a0) * R, c,
+                         ccx[q] + cosf(a1) * R, ccy[q] + sinf(a1) * R, c, th, z);
+        }
+    }
+}
+static void neon_ring(float w, float h, float z)
+{
+    ring_path(w, h, 2.5f, 15.5f, 5.0f, neon_glow(), z);
+    ring_path(w, h, 2.0f, 15.0f, 2.4f, C(S.accent), z + 0.002f);
+}
+
+/* Spinning compact disc: a rim, a dark body, two sheen wedges that rotate with the music and a hub. */
+static void icon_cd(float cx, float cy, float r, float z)
+{
+    const u32 cAcc = C(S.accent), cGl = neon_glow();
+    const u32 cBody = C(mix_rgb(S.bg, S.text, 36));
+    const u32 cMid  = C(mix_rgb(S.bg, S.accent, 90));
+    const u32 cLite = C(mix_rgb(S.accent, S.text, 150));
+    const float rr = (r - 1.5f) * 0.97f;
+    C2D_DrawCircleSolid(cx, cy, z, r + 1.5f, cGl);
+    C2D_DrawCircleSolid(cx, cy, z + 0.002f, r, cAcc);
+    C2D_DrawCircleSolid(cx, cy, z + 0.004f, r - 1.4f, cBody);
+    for (int w = 0; w < 2; w++) {
+        for (int i = 0; i < 3; i++) {
+            const float a0 = cd_phase + (float)w * 3.14159f + (float)i * 0.32f, a1 = a0 + 0.32f;
+            C2D_DrawTriangle(cx, cy, cMid, cx + cosf(a0) * rr, cy + sinf(a0) * rr, cLite,
+                             cx + cosf(a1) * rr, cy + sinf(a1) * rr, cLite, z + 0.006f);
+        }
+    }
+    C2D_DrawCircleSolid(cx, cy, z + 0.008f, r * 0.36f, cAcc);
+    C2D_DrawCircleSolid(cx, cy, z + 0.010f, r * 0.17f, C(S.bg));
+}
+
 /* LED-style equalizer: stacks of small squares; animated while music plays, a fixed pattern otherwise */
 static void icon_eq(float x, float y, float w, float h, bool live, u32 c)
 {
@@ -1129,8 +1203,9 @@ static void icon_heart_z(float cx, float cy, float s, u32 c, float z)
 static void icon_heart(float cx, float cy, float s, u32 c) { icon_heart_z(cx, cy, s, c, 0.45f); }
 static void icon_heart_line(float cx, float cy, float s, u32 rim, u32 fill)   /* outlined heart; fill = what lies behind it */
 {
+    const float t = 1.7f;                       /* ring thickness in px, kept even all the way round */
     icon_heart_z(cx, cy, s, rim, 0.45f);
-    icon_heart_z(cx, cy + s * 0.05f, s * 0.68f, fill, 0.46f);
+    icon_heart_z(cx, cy + 0.05f * t, s - 1.1f * t, fill, 0.46f);
 }
 
 static void icon_home(float cx, float cy, u32 c, u32 door)
@@ -1198,46 +1273,53 @@ static float progress_frac(u32 pos, u32 dur)
 static void draw_status_bar(void)         /* battery / sleep-timer marks, tucked into the clock capsule */
 {
     u32 cAcc = C(S.accent), cTrk = C(mix_rgb(S.bg, S.accent, 90));
-    if (sleep_timer_active) C2D_DrawCircleSolid(385, 12.5f, 0.45f, 2.2f, cAcc);
+    if (sleep_timer_active) C2D_DrawCircleSolid(385, 15.0f, 0.45f, 2.2f, cAcc);
     if (S.show_batt && batt_pct >= 0) {
         float fw = 14.0f * (float)batt_pct / 100.0f;
-        rrect(364, 10, 14, 5, 2.5f, 0.40f, cTrk);
-        if (fw >= 5.0f) rrect(364, 10, fw, 5, 2.5f, 0.42f, cAcc);
-        else C2D_DrawCircleSolid(366.5f, 12.5f, 0.42f, 2.5f, cAcc);
-        if (batt_chg) C2D_DrawCircleSolid(359.5f, 12.5f, 0.45f, 1.8f, cAcc);
+        rrect(364, 12.5f, 14, 5, 2.5f, 0.40f, cTrk);
+        if (fw >= 5.0f) rrect(364, 12.5f, fw, 5, 2.5f, 0.42f, cAcc);
+        else C2D_DrawCircleSolid(366.5f, 15.0f, 0.42f, 2.5f, cAcc);
+        if (batt_chg) C2D_DrawCircleSolid(359.5f, 15.0f, 0.45f, 1.8f, cAcc);
     }
 }
 
-static void draw_visualizer(float x, float y, float size)
+static void draw_visualizer(float x, float y, float size)     /* reacts to the music: see vis_update() */
 {
-    u32 accent = C(S.accent), soft = C(mix_rgb(S.accent, S.bg, 110));
-    float cx = x + size * 0.5f, cy = y + size * 0.5f, k = size / 134.0f;
-    if (S.display_mode == 1) {
-        const float sp = (size - 13.2f) / 23.0f;
-        for (int i = 0; i < 24; i++) {
-            float a = sinf(eq_phase * (1.0f + (i % 5) * 0.13f) + i * 0.57f);
-            float b = cosf(eq_phase * 0.63f + i * 0.31f);
-            float h = (15.0f + (a * 0.5f + 0.5f) * 74.0f + (b * 0.5f + 0.5f) * 20.0f) * k;
-            rrect(x + 5 + i * sp, cy - h * 0.5f, 3.2f, h, 1.6f, 0.40f, (i % 3) ? accent : soft);
+    const u32 accent = C(S.accent), soft = C(mix_rgb(S.accent, S.bg, 110)), cap = C(mix_rgb(S.accent, S.text, 150));
+    const float cx = x + size * 0.5f, cy = y + size * 0.5f, k = size / 134.0f;
+    if (S.display_mode == 1) {                                   /* spectrum: 24 bars + falling peak caps */
+        const int N = 24;
+        const float sp = (size - 10.0f) / (float)N, bw = sp - 1.8f, base = y + size - 8.0f, maxh = size - 18.0f;
+        for (int i = 0; i < N; i++) {
+            const float f = (float)i / (float)(N - 1) * (float)(AUDIO_VIS_BANDS - 1);
+            const int i0 = (int)f, i1 = (i0 + 1 < AUDIO_VIS_BANDS) ? i0 + 1 : i0;
+            const float fr = f - (float)i0;
+            const float v  = vis_band[i0] * (1.0f - fr) + vis_band[i1] * fr;
+            const float pk = vis_peak[i0] * (1.0f - fr) + vis_peak[i1] * fr;
+            const float h  = 3.0f + v * maxh;
+            rrect(x + 5 + (float)i * sp, base - h, bw, h, bw * 0.5f, 0.40f, (i % 3) ? accent : soft);
+            C2D_DrawRectSolid(x + 5 + (float)i * sp, base - 5.0f - pk * maxh, 0.41f, bw, 2.0f, cap);
         }
-    } else if (S.display_mode == 2) {
-        for (int i = 0; i < 38; i++) {
-            float a = (float)i / 37.0f;
-            float yy = cy + sinf(a * 12.566f + eq_phase * 1.4f) * (18.0f + 17.0f * sinf(eq_phase * 0.7f + a * 6.28f)) * k;
-            C2D_DrawCircleSolid(x + 5 + a * (size - 10), yy, 0.40f, 2.2f, accent);
-        }
-        rrect(x + 5, cy - 1, size - 10, 2, 1, 0.35f, soft);
-    } else {
+    } else if (S.display_mode == 2) {                            /* waveform: the actual samples */
+        const float step = (size - 10.0f) / (float)(AUDIO_VIS_WAVE - 1), amp = size * 0.40f;
+        rrect(x + 5, cy - 0.75f, size - 10, 1.5f, 0.75f, 0.35f, soft);
+        for (int i = 0; i < AUDIO_VIS_WAVE - 1; i++)
+            C2D_DrawLine(x + 5 + (float)i * step, cy + vis_wave[i] * amp, accent,
+                         x + 5 + (float)(i + 1) * step, cy + vis_wave[i + 1] * amp, accent, 2.2f, 0.40f);
+    } else {                                                     /* orbit: bass / mid / treble rings */
+        float lvl[3] = { 0, 0, 0 };
+        for (int i = 0; i < 3; i++)  lvl[0] += vis_band[i] / 3.0f;
+        for (int i = 3; i < 8; i++)  lvl[1] += vis_band[i] / 5.0f;
+        for (int i = 8; i < AUDIO_VIS_BANDS; i++) lvl[2] += vis_band[i] / 4.0f;
         for (int ring = 0; ring < 3; ring++) {
-            float radius = (23.0f + ring * 19.0f) * k;
+            const float radius = (23.0f + (float)ring * 19.0f + lvl[ring] * 9.0f) * k;
             for (int i = 0; i < 12; i++) {
-                float a = (float)i * 0.523599f + eq_phase * (ring % 2 ? -0.35f : 0.35f);
-                float pulse = 0.75f + 0.25f * sinf(eq_phase * 1.8f + i + ring);
-                C2D_DrawCircleSolid(cx + cosf(a) * radius, cy + sinf(a) * radius,
-                                    0.40f, 2.5f + pulse * 2.0f, ring == 1 ? soft : accent);
+                const float a = (float)i * 0.523599f + eq_phase * (ring % 2 ? -0.35f : 0.35f);
+                C2D_DrawCircleSolid(cx + cosf(a) * radius, cy + sinf(a) * radius, 0.40f,
+                                    2.3f + lvl[ring] * 4.2f, ring == 1 ? soft : accent);
             }
         }
-        C2D_DrawCircleSolid(cx, cy, 0.40f, 7.0f, accent);
+        C2D_DrawCircleSolid(cx, cy, 0.40f, 6.0f + vis_bass * 7.0f, accent);
         C2D_DrawCircleSolid(cx, cy, 0.41f, 3.0f, C(S.bg));
     }
 }
@@ -1276,32 +1358,30 @@ static void draw_top(void)
     const bool playing = track_loaded && audio_is_active() && !audio_is_paused();
     const bool use_flow = (S.display_mode == 0) && flow_appear > 0.01f && L.n > 0;
 
-    neon_frame(TOP_W, SCR_H, 0.03f);
+    top_background();                      /* ambient glow tinted by the cover (behind everything) */
+    neon_ring(TOP_W, SCR_H, 0.03f);        /* outline only, so the glow shows through */
 
     /* ---- header: brand + state | clock ---- */
-    neon_box(8, 4, S.clock_mode ? 250 : 384, 17, 8.5f, 0.08f, cAcc, cGlow, cFill);
-    icon_eq(17, 7, 14, 11, playing, cAcc);
-    row_text("PROJECT", 38, 4, 17, 0.40f, cText, C2D_AlignLeft, 70);
-    row_text("NOISE", 88, 4, 17, 0.40f, cAcc, C2D_AlignLeft, 56);
+    neon_box(8, 4, S.clock_mode ? 250 : 384, 22, 11.0f, 0.08f, cAcc, cGlow, cFill);
+    icon_eq(19, 8, 16, 14, playing, cAcc);
+    row_text("PROJECT", 42, 4, 22, 0.50f, cText, C2D_AlignLeft, 80);
+    row_text("NOISE", 108, 4, 22, 0.50f, cAcc, C2D_AlignLeft, 64);
     row_text(track_loaded && !browsing_view() ? "NOW PLAYING" : "BROWSING",
-             S.clock_mode ? 248 : 352, 4, 17, 0.30f, cDim, C2D_AlignRight, 100);
+             S.clock_mode ? 244 : 348, 4, 22, 0.34f, cDim, C2D_AlignRight, 100);
 
     if (S.clock_mode) {
-        neon_box(264, 4, 128, 17, 8.5f, 0.08f, cAcc, cGlow, cFill);
+        neon_box(264, 4, 128, 22, 11.0f, 0.08f, cAcc, cGlow, cFill);
         time_t now = time(NULL);
         struct tm *tmv = localtime(&now);
         if (tmv) {
-            static const char *wd[] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
             char cb[32];
             if (S.clock_mode == 1) {
                 int hr = tmv->tm_hour % 12; if (hr == 0) hr = 12;
-                snprintf(cb, sizeof cb, "%02d/%02d (%s) %d:%02d%c", tmv->tm_mon + 1, tmv->tm_mday, wd[tmv->tm_wday],
-                         hr, tmv->tm_min, tmv->tm_hour < 12 ? 'a' : 'p');
+                snprintf(cb, sizeof cb, "%d:%02d %s", hr, tmv->tm_min, tmv->tm_hour < 12 ? "AM" : "PM");
             } else {
-                snprintf(cb, sizeof cb, "%02d/%02d (%s) %02d:%02d", tmv->tm_mon + 1, tmv->tm_mday, wd[tmv->tm_wday],
-                         tmv->tm_hour, tmv->tm_min);
+                snprintf(cb, sizeof cb, "%02d:%02d", tmv->tm_hour, tmv->tm_min);
             }
-            row_text(cb, 313, 4, 17, 0.34f, cText, C2D_AlignCenter, 88);
+            row_text(cb, 306, 4, 22, 0.46f, cText, C2D_AlignCenter, 80);
         }
     }
     draw_status_bar();
@@ -1356,12 +1436,9 @@ static void draw_top(void)
     }
 
     /* ---- song panel: the same look as a highlighted row on the bottom screen ---- */
-    const float py = 178, ph = 34, pcy = py + ph / 2;
+    const float py = 176, ph = 40, pcy = py + ph / 2;
     neon_box(24, py, 352, ph, 12, 0.08f, cAcc, cGlow, cRowSel);
-    neon_disc(46, pcy, 11, 0.10f, cAcc, cGlow, cFill);
-    if (playing)         icon_eq(41.5f, pcy - 5, 9, 10, true, cAcc);
-    else if (track_loaded) icon_pause(46, pcy, 4.5f, cAcc);
-    else                 icon_small_note(39.5f, pcy - 8, cAcc);
+    icon_cd(48, pcy, 14.0f, 0.10f);                          /* spins while the music plays */
 
     const char *title = "Nothing playing", *sub = "Pick a song to start";
     if (track_loaded) {
@@ -1376,25 +1453,25 @@ static void draw_top(void)
                           : (e->title[0] ? e->title : base_name(e->name));
         sub = e->is_dir ? "Folder" : e->artist;
     }
-    draw_text(title, 66, py + 1, 0.60f, cAcc, C2D_AlignLeft, track_loaded ? 262 : 292);
-    if (sub[0]) draw_text(sub, 66, py + 20, 0.34f, cText, C2D_AlignLeft, 262);
+    draw_text(title, 72, py + 2, 0.70f, cAcc, C2D_AlignLeft, track_loaded ? 262 : 280);
+    if (sub[0]) draw_text(sub, 72, py + 23, 0.44f, cText, C2D_AlignLeft, 262);
     if (track_loaded) {
-        if (track_is_favorite()) icon_heart(357, pcy, 6.0f, cAcc);
-        else icon_heart_line(357, pcy, 6.0f, cDim, cRowSel);
+        if (track_is_favorite()) icon_heart(357, pcy, 7.0f, cAcc);
+        else icon_heart_line(357, pcy, 7.0f, cDim, cRowSel);
     }
 
     /* ---- seek bar ---- */
     u32 pos = track_loaded ? audio_position_ms() : 0;
     u32 dur = track_loaded ? cur.duration_ms : 0;
     float frac = progress_frac(pos, dur);
-    const float bx0 = 66.0f, bw = 268.0f, by = 227.0f;
+    const float bx0 = 66.0f, bw = 268.0f, by = 226.0f;
     char tb[24];
 
     if (track_loaded) {
         fmt_time(tb, sizeof tb, pos);
-        row_text(tb, 26, by - 7, 14, 0.34f, cDim, C2D_AlignLeft, 38);
+        row_text(tb, 26, by - 8, 16, 0.40f, cDim, C2D_AlignLeft, 38);
         fmt_time(tb, sizeof tb, dur);
-        row_text(tb, 374, by - 7, 14, 0.34f, cDim, C2D_AlignRight, 38);
+        row_text(tb, 374, by - 8, 16, 0.40f, cDim, C2D_AlignRight, 38);
     }
     rrect(bx0 - 2, by - 5, bw + 4, 10, 5, 0.06f, cGlow);
     rrect(bx0, by - 3, bw, 6, 3, 0.08f, cTrk);
@@ -1417,11 +1494,14 @@ static void draw_frame(void)                  /* neon outline + dark fill for th
     neon_frame(BOT_W, SCR_H, 0.10f);
 }
 
-static void draw_toast(void)                  /* short status pill just above the deck */
+static void draw_toast(void)                  /* status pill above the deck; sits in front of the list text */
 {
     if (toast_t <= 0) return;
-    rrect(70, 166, 180, 20, 10, 0.46f, C(S.accent));
-    row_text(toast_msg, 160, 166, 20, 0.42f, C(S.bg), C2D_AlignCenter, 168);
+    const float w = 204, x = (BOT_W - w) / 2, y = 168, h = 22;
+    neon_box(x, y, w, h, 11, 0.55f, C(S.accent), neon_glow(), C(mix_rgb(S.bg, S.accent, 60)));
+    text_z = 0.6f;                              /* text is normally z 0.5, which would show list text through the pill */
+    row_text(toast_msg, BOT_W / 2.0f, y, h, 0.44f, C(S.text), C2D_AlignCenter, w - 18);
+    text_z = 0.5f;
 }
 
 /* Now Playing | shuffle - prev - play/pause - next - repeat | volume.  Touch zones: handle_ctrl_tap. */
@@ -1443,18 +1523,19 @@ static void draw_deck(void)
     u32 dur = track_loaded ? cur.duration_ms : 0;
     float frac = slider_drag ? slider_frac : progress_frac(pos, dur);
     neon_box(6, y, 114, h, 13, 0.20f, cAcc, cGlow, cFill);
-    icon_eq(15, y + 8, 14, 16, playing, cAcc);
+    icon_cd(23, y + 18, 10.0f, 0.45f);
+    char sub[48];
     if (slider_drag) {
         char a[16], b[16];
         fmt_time(a, sizeof a, (u32)(slider_frac * (float)dur));
         fmt_time(b, sizeof b, dur);
-        snprintf(buf, sizeof buf, "%s / %s", a, b);
+        snprintf(sub, sizeof sub, "%s / %s", a, b);
     } else {
-        snprintf(buf, sizeof buf, "Now Playing:");
+        snprintf(sub, sizeof sub, "%s", track_loaded ? cur.artist : "Pick a song");
     }
-    draw_text(buf, 36, y + 4, 0.28f, cDim, C2D_AlignLeft, 78);
     const char *title = track_loaded ? (cur.title[0] ? cur.title : base_name(cur_path)) : "Not playing";
-    draw_text(title, 36, y + 13, 0.44f, track_loaded ? cAcc : cText, C2D_AlignLeft, 78);
+    draw_text(title, 38, y + 2, 0.50f, track_loaded ? cAcc : cText, C2D_AlignLeft, 78);
+    if (sub[0]) draw_text(sub, 38, y + 18, 0.34f, cDim, C2D_AlignLeft, 78);
 
     const float tw = SL_X1 - SL_X0, ty = y + 33;
     rrect(SL_X0, ty - 2, tw, 4, 2, 0.30f, cTrk);
@@ -1534,7 +1615,7 @@ static void draw_browser(void)
     }
 
     /* ---- song list ---- */
-    const float RX = 8, RW = 290, RH = ROW_H - 3;
+    const float RX = 8, RW = 290, RH = ROW_H - 4;
     int loads_this_frame = 0;
     for (int i = 0; i < VIS_ROWS; i++) {
         int idx = scroll_top + i;
@@ -1546,11 +1627,11 @@ static void draw_browser(void)
         bool selected = (idx == sel);
         u32 rowfill = selected ? cRowSel : cRowFill;
 
-        if (selected) neon_box(RX, y, RW, RH, 9, 0.20f, cAcc, cGlow, cRowSel);
-        else          neon_box(RX, y, RW, RH, 9, 0.20f, cGrey, cGreyGl, cRowFill);
+        if (selected) neon_box(RX, y, RW, RH, 11, 0.20f, cAcc, cGlow, cRowSel);
+        else          neon_box(RX, y, RW, RH, 11, 0.20f, cGrey, cGreyGl, cRowFill);
 
         /* cover thumbnail (or a tile while it is still loading / for folders) */
-        const float tx = RX + 5, tyy = y + 3, ts = 22;
+        const float ts = 30, tx = RX + 7, tyy = y + (RH - ts) / 2;
         C3D_Tex *tex = NULL;
         if (!e->is_dir) {
             if (cur_row && art_ready()) tex = art_image()->tex;
@@ -1560,44 +1641,44 @@ static void draw_browser(void)
             draw_thumb(tex, tx, tyy, ts, 0.30f);
         } else {
             Rgb tc = e->is_dir ? mix_rgb(S.select, S.text, 60) : tile_color(e->name);
-            rrect(tx, tyy, ts, ts, 5, 0.30f, C(tc));
+            rrect(tx, tyy, ts, ts, 6, 0.30f, C(tc));
             if (e->is_dir) {
-                C2D_DrawRectSolid(tx + 4, tyy + 6, 0.45f, 6, 3, cText);
-                C2D_DrawRectSolid(tx + 4, tyy + 8, 0.45f, 14, 9, cText);
+                C2D_DrawRectSolid(tx + 6, tyy + 9, 0.45f, 8, 4, cText);
+                C2D_DrawRectSolid(tx + 6, tyy + 12, 0.45f, 18, 12, cText);
             } else if (!playing) {
-                icon_small_note(tx + 4.5f, tyy + 3, cText);
+                icon_small_note(tx + 8.5f, tyy + 7, cText);
             }
         }
         if (playing) {                                      /* animated bars over the thumbnail */
-            if (tex) C2D_DrawRectSolid(tx, tyy + 13, 0.42f, ts, 9, C2D_Color32(0, 0, 0, 170));
+            if (tex) C2D_DrawRectSolid(tx, tyy + ts - 14, 0.42f, ts, 14, C2D_Color32(0, 0, 0, 170));
             for (int k = 0; k < 3; k++) {
-                float hb = 3.0f + 8.0f * (0.5f + 0.5f * sinf(eq_phase * 2.0f + k * 1.7f));
-                C2D_DrawRectSolid(tx + 5 + k * 5, tyy + 20 - hb, 0.45f, 3, hb, cAcc);
+                float hb = 3.0f + 9.0f * (0.5f + 0.5f * sinf(eq_phase * 2.0f + k * 1.7f));
+                C2D_DrawRectSolid(tx + 7 + k * 7, tyy + ts - 3 - hb, 0.45f, 4, hb, cAcc);
             }
         }
 
-        const float lx = RX + 34;
+        const float lx = RX + 46;
         if (e->is_dir) {
-            row_text(!strcmp(e->name, "..") ? "Back" : e->name, lx, y, RH, 0.46f, selected ? cAcc : cText, C2D_AlignLeft, 245);
+            row_text(!strcmp(e->name, "..") ? "Back" : e->name, lx, y, RH, 0.60f, selected ? cAcc : cText, C2D_AlignLeft, 232);
             continue;
         }
         if (!e->meta_loaded && loads_this_frame < 1 && flow_idle > 2) { ensure_meta(e); loads_this_frame++; }
         const char *name = (e->meta_loaded && e->title[0]) ? e->title : base_name(e->name);
         u32 tcol = (selected || cur_row) ? cAcc : cText;
         if (e->meta_loaded && e->artist[0]) {
-            draw_text(name, lx, y + 1, 0.44f, tcol, C2D_AlignLeft, 190);
-            draw_text(e->artist, lx, y + 15, 0.28f, cDim, C2D_AlignLeft, 190);
+            draw_text(name, lx, y + 3, 0.58f, tcol, C2D_AlignLeft, 170);
+            draw_text(e->artist, lx, y + 22, 0.42f, cDim, C2D_AlignLeft, 170);
         } else {
-            row_text(name, lx, y, RH, 0.44f, tcol, C2D_AlignLeft, 190);
+            row_text(name, lx, y, RH, 0.58f, tcol, C2D_AlignLeft, 170);
         }
         u32 dms = (cur_row && track_loaded && cur.duration_ms) ? cur.duration_ms : e->duration_ms;
         if (dms) {
             fmt_time(buf, sizeof buf, dms);
-            row_text(buf, 268, y, RH, 0.38f, cText, C2D_AlignRight, 36);
+            row_text(buf, 264, y, RH, 0.48f, cText, C2D_AlignRight, 40);
         }
         char favpath[256]; entry_relative_path(e, favpath, sizeof favpath);
-        if (is_favorite(favpath)) icon_heart(285, y + RH / 2, 5.2f, cAcc);
-        else                      icon_heart_line(285, y + RH / 2, 5.2f, cHeart, rowfill);
+        if (is_favorite(favpath)) icon_heart(283, y + RH / 2, 6.6f, cAcc);
+        else                      icon_heart_line(283, y + RH / 2, 6.6f, cHeart, rowfill);
     }
 
     if (L.n == 0) {
@@ -1606,7 +1687,7 @@ static void draw_browser(void)
     }
 
     /* ---- scrollbar: arrows (tap) + thumb ---- */
-    const float sbx = 303, sbw = 12, sbh = VIS_ROWS * ROW_H - 3;
+    const float sbx = 303, sbw = 12, sbh = VIS_ROWS * ROW_H - 4;
     neon_box(sbx, LIST_TOP, sbw, sbh, 6, 0.20f, cGrey, cGreyGl, cRowFill);
     C2D_DrawTriangle(sbx + 3, LIST_TOP + 11, cAcc, sbx + sbw - 3, LIST_TOP + 11, cAcc, sbx + sbw / 2, LIST_TOP + 5, cAcc, 0.45f);
     C2D_DrawTriangle(sbx + 3, LIST_TOP + sbh - 11, cAcc, sbx + sbw - 3, LIST_TOP + sbh - 11, cAcc, sbx + sbw / 2, LIST_TOP + sbh - 5, cAcc, 0.45f);
@@ -1737,7 +1818,7 @@ static const char *row_label(int r)
     case ROW_PRESET:       return "Theme";
     case ROW_GLOW:         return "Ambient glow";
     case ROW_FADE:         return "Cover fade";
-    case ROW_DISPLAY:      return "Display";
+    case ROW_DISPLAY:      return "Visualizer";
     case ROW_WALLPAPER:    return "Wallpaper";
     case ROW_EQMAN:        return "Manual EQ";
     case ROW_EQPRE:        return "EQ preset";
@@ -2479,7 +2560,8 @@ int main(void)
             else dirty_timer = 180; /* retry later; do not discard unsaved changes */
         }
 
-        if (audio_is_active() && !audio_is_paused()) eq_phase += 0.08f;
+        if (audio_is_active() && !audio_is_paused()) { eq_phase += 0.08f; cd_phase += 0.075f; }
+        vis_update();
         if (toast_t > 0) toast_t--;
         if (ctrl_flash_t > 0) ctrl_flash_t--;
         if (S.show_batt) { if (--batt_timer <= 0) { batt_poll(); batt_timer = 120; } }   /* every ~2 s */

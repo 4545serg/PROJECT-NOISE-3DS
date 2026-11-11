@@ -117,6 +117,83 @@ static void eq_process(s16 *d, int frames)
     }
 }
 
+/* ---- visualizer analysis: 12 Goertzel bands + a decimated waveform per decoded chunk ---- */
+#define VIS_N     768
+#define VIS_SLOTS 10
+typedef struct { volatile u32 start; volatile bool valid; float band[AUDIO_VIS_BANDS]; float wave[AUDIO_VIS_WAVE]; } VisSlot;
+static VisSlot         vis_ring[VIS_SLOTS];
+static int             vis_head;
+static u32             g_dec_frames;          /* frames decoded (and queued) since the track start / seek point */
+static float           vis_win[VIS_N], vis_x[VIS_N], vis_coef[AUDIO_VIS_BANDS];
+static int             vis_hz;
+static bool            vis_win_ready;
+static const float     VIS_FREQ[AUDIO_VIS_BANDS] = { 60, 100, 160, 260, 420, 680, 1100, 1800, 3000, 5000, 8000, 12000 };
+
+static void vis_reset(void)
+{
+    for (int i = 0; i < VIS_SLOTS; i++) vis_ring[i].valid = false;
+    vis_head = 0;
+}
+
+static void vis_analyze(const s16 *d, int frames, u32 start)
+{
+    if (frames < 64) return;
+    if (!vis_win_ready) {
+        for (int i = 0; i < VIS_N; i++) vis_win[i] = 0.5f - 0.5f * cosf(6.2831853f * (float)i / (float)(VIS_N - 1));
+        vis_win_ready = true;
+    }
+    if (vis_hz != eq_hz || vis_coef[0] == 0.0f) {
+        vis_hz = eq_hz ? eq_hz : 44100;
+        for (int b = 0; b < AUDIO_VIS_BANDS; b++)
+            vis_coef[b] = (VIS_FREQ[b] < (float)vis_hz * 0.45f) ? 2.0f * cosf(6.2831853f * VIS_FREQ[b] / (float)vis_hz) : 0.0f;
+    }
+    const int n = frames < VIS_N ? frames : VIS_N, base = frames - n;
+    for (int i = 0; i < n; i++) {
+        float m = ((float)d[2 * (base + i)] + (float)d[2 * (base + i) + 1]) * (0.5f / 32768.0f);
+        vis_x[i] = m * vis_win[(i * (VIS_N - 1)) / (n > 1 ? n - 1 : 1)];
+    }
+    VisSlot *sl = &vis_ring[vis_head];
+    sl->valid = false;
+    for (int b = 0; b < AUDIO_VIS_BANDS; b++) {
+        float c = vis_coef[b], s1 = 0.0f, s2 = 0.0f, lvl = 0.0f;
+        if (c != 0.0f) {
+            for (int i = 0; i < n; i++) { float s0 = vis_x[i] + c * s1 - s2; s2 = s1; s1 = s0; }
+            float p = s1 * s1 + s2 * s2 - c * s1 * s2;
+            float amp = sqrtf(p > 0.0f ? p : 0.0f) * 4.0f / (float)n;
+            float db = 8.685889f * logf(amp + 1e-5f);
+            lvl = (db + 60.0f + 1.6f * (float)b) / 50.0f;          /* gentle tilt: treble carries less energy */
+            if (lvl < 0.0f) lvl = 0.0f;
+            if (lvl > 1.0f) lvl = 1.0f;
+        }
+        sl->band[b] = lvl;
+    }
+    const int seg = frames / AUDIO_VIS_WAVE;
+    for (int k = 0; k < AUDIO_VIS_WAVE; k++) {
+        float acc = 0.0f;
+        for (int i = 0; i < seg; i++) acc += (float)d[2 * (k * seg + i)] + (float)d[2 * (k * seg + i) + 1];
+        float v = acc / (float)(seg * 2) / 32768.0f * 2.4f;
+        sl->wave[k] = v > 1.0f ? 1.0f : (v < -1.0f ? -1.0f : v);
+    }
+    sl->start = start;
+    sl->valid = true;
+    vis_head = (vis_head + 1) % VIS_SLOTS;
+}
+
+bool audio_get_vis(float bands[AUDIO_VIS_BANDS], float wave[AUDIO_VIS_WAVE])
+{
+    if (!g_active || g_want_pause) return false;
+    const u32 now = g_played;                 /* the buffer playing right now starts at this frame */
+    int best = -1;
+    for (int i = 0; i < VIS_SLOTS; i++) {
+        if (!vis_ring[i].valid || vis_ring[i].start > now) continue;
+        if (best < 0 || vis_ring[i].start > vis_ring[best].start) best = i;
+    }
+    if (best < 0 || now - vis_ring[best].start > 6000) return false;
+    memcpy(bands, vis_ring[best].band, sizeof(float) * AUDIO_VIS_BANDS);
+    memcpy(wave, vis_ring[best].wave, sizeof(float) * AUDIO_VIS_WAVE);
+    return true;
+}
+
 static void apply_volume(int v)
 {
     float mix[12];
@@ -315,6 +392,8 @@ static void handle_request(void)
     in_eof = dec_done = rate_set = false;
     fill_i = rec_i = 0;
     g_played = (frac >= 0.0f) ? (u32)((u64)ms * (g_rate ? g_rate : 44100u) / 1000u) : 0;
+    g_dec_frames = g_played;
+    vis_reset();
 
     ndspChnSetInterp(0, NDSP_INTERP_LINEAR);
     ndspChnSetFormat(0, NDSP_FORMAT_STEREO_PCM16);
@@ -342,6 +421,8 @@ static void pump(void)
 
         if (g_eq_dirty || hz != eq_hz) eq_update(hz);
         eq_process(dst, frames);
+        vis_analyze(dst, frames, g_dec_frames);
+        g_dec_frames += (u32)frames;
 
         if (!rate_set) {
             ndspChnSetRate(0, (float)hz);
