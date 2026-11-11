@@ -7,6 +7,7 @@ typedef struct {
     bool meta_loaded;      /* lazily filled for visible rows */
     char title[96];
     char artist[64];
+    unsigned duration_ms;  /* 0 until the row's tags have been read, or unknown */
 } Entry;
 
 typedef struct {

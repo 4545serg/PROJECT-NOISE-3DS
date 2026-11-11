@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Fixed (repo layout)
+- The neon UI, CIA workflow, fixed `app.rsf` and newer `get_deps.sh` were sitting loose in the repo root while the
+  Makefile only builds `source/`, so builds kept producing the old UI. Everything now lives in `source/`,
+  `resources/`, `tools/` and `.github/workflows/`; duplicate `file (N).ext` copies were removed.
+- The CIA workflow had doubled backslashes (`\\`) in its `docker run` command, which breaks the shell line.
+- Top-screen clock now reads `11/10 (Tue) 15:24`, as in the mock-up.
+
 ### Changed (UI)
 - Rebuilt the bottom screen: cleaner header, **All Songs / Liked** tabs (Playlists removed), roomier song rows,
   a new now-playing deck, and the Neon green theme as the default. Fixed bottom-screen layering so panels no

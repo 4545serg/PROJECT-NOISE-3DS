@@ -126,7 +126,7 @@ int search_run(DirList *out, const char *query)
     snprintf(out->dir, sizeof out->dir, "%s", MUSIC_ROOT);
     dir_add(out, "..", true);                      /* row 0: leave the results */
 
-    char tok[MAX_TOKENS][64];
+    char tok[MAX_TOKENS][64] = { { 0 } };
     int nt = 0;
     const char *p = query;
     while (*p && nt < MAX_TOKENS) {

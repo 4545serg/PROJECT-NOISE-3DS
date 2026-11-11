@@ -13,6 +13,7 @@ void  art_set_default(const unsigned char *data, size_t size);
 void  art_queue(unsigned char *data, size_t size);
 void  art_commit(void);
 bool  art_ready(void);
+unsigned art_serial(void);   /* increments each time a new cover actually becomes visible */
 const C2D_Image *art_image(void);
 void  art_shutdown(void);
 /* Build a standalone 128x128 texture from JPEG/PNG data (used by the cover-flow cache). */
@@ -22,3 +23,10 @@ bool  art_build_tex(C3D_Tex *tex, const unsigned char *data, size_t size);
 #define ART_PIXEL_BYTES (128 * 128 * 4)
 bool  art_decode(const unsigned char *data, size_t size, unsigned char *px);
 bool  art_upload(C3D_Tex *tex, const unsigned char *px);
+
+/* Ambient colour of a cover: the dominant vivid hue (or a neutral average for grey covers), as
+ * 0xRRGGBB, brightness-normalised so it makes a good glow. Pure CPU, any thread, order-independent
+ * (works directly on the tiled `px` buffer). Returns false for a (nearly) black / empty image. */
+bool  art_color_of(const unsigned char *px, u32 *rgb);
+/* Colour of the artwork currently shown by art_image(); false while it is the default logo. */
+bool  art_color(u32 *rgb);

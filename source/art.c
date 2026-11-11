@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "libcfg.h"
 #include "stb_image.h"
 
 #define ART_SIZE        128
@@ -20,6 +21,10 @@ static size_t             g_default_size;
 static unsigned char     *g_pending;
 static size_t             g_pending_size;
 static bool               g_pending_flag;
+
+static u32                g_color;                /* ambient colour of the artwork on screen */
+static bool               g_color_ok;
+static unsigned           g_serial;
 
 static u32 morton_interleave(u32 x, u32 y)
 {
@@ -113,9 +118,87 @@ bool art_build_tex(C3D_Tex *tex, const unsigned char *data, size_t size)
     return ok;
 }
 
-static bool build_texture(const unsigned char *data, size_t size)
+/* Dominant-hue colour: pixels vote into 12 hue bins weighted by saturation x brightness; the winning
+ * bin (plus its two neighbours) is averaged. Covers with no real colour fall back to a plain average. */
+bool art_color_of(const unsigned char *px, u32 *rgb)
 {
-    if (!art_build_tex(&g_tex, data, size)) return false;
+    enum { HUES = 12 };
+    unsigned long w_sum[HUES] = { 0 }, r_sum[HUES] = { 0 }, g_sum[HUES] = { 0 }, b_sum[HUES] = { 0 };
+    unsigned long ar = 0, ag = 0, ab = 0, an = 0;
+
+    for (int i = 0; i < ART_SIZE * ART_SIZE; i += 2) {         /* every other pixel is plenty */
+        const unsigned char *p = px + (size_t)i * 4;            /* bytes are A,B,G,R */
+        int b = p[1], g = p[2], r = p[3];
+        ar += (unsigned long)r; ag += (unsigned long)g; ab += (unsigned long)b; an++;
+
+        int mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+        int mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
+        int d = mx - mn;
+        if (mx < 40 || d < 24) continue;                        /* too dark / too grey to carry a hue */
+
+        int h;
+        if (mx == r)      h = 60 * (g - b) / d;
+        else if (mx == g) h = 120 + 60 * (b - r) / d;
+        else              h = 240 + 60 * (r - g) / d;
+        if (h < 0) h += 360;
+        int bin = (h * HUES / 360) % HUES;
+
+        unsigned long w = (unsigned long)((d * 255 / mx) * mx) >> 8;     /* saturation x value, 0..255 */
+        w_sum[bin] += w;
+        r_sum[bin] += (unsigned long)r * w;
+        g_sum[bin] += (unsigned long)g * w;
+        b_sum[bin] += (unsigned long)b * w;
+    }
+    if (!an) return false;
+
+    int best = 0;
+    unsigned long best_score = 0;
+    for (int k = 0; k < HUES; k++) {
+        unsigned long s = w_sum[k] * 2 + w_sum[(k + 1) % HUES] + w_sum[(k + HUES - 1) % HUES];
+        if (s > best_score) { best_score = s; best = k; }
+    }
+
+    int r, g, b;
+    if (best_score > an * 8) {                                  /* a real colour is present */
+        unsigned long w = 0, rr = 0, gg = 0, bb = 0;
+        for (int k = -1; k <= 1; k++) {
+            int j = (best + k + HUES) % HUES;
+            w += w_sum[j]; rr += r_sum[j]; gg += g_sum[j]; bb += b_sum[j];
+        }
+        if (!w) return false;
+        r = (int)(rr / w); g = (int)(gg / w); b = (int)(bb / w);
+        int m = r > g ? (r > b ? r : b) : (g > b ? g : b);      /* bring it to a bright, clean glow colour */
+        if (m < 1) return false;
+        int target = m < 170 ? 170 : (m > 240 ? 240 : m);
+        r = r * target / m; g = g * target / m; b = b * target / m;
+    } else {                                                    /* grey / black-and-white cover */
+        r = (int)(ar / an); g = (int)(ag / an); b = (int)(ab / an);
+        int m = r > g ? (r > b ? r : b) : (g > b ? g : b);
+        if (m < 20) return false;                               /* (nearly) black: no glow */
+        if (m > 200) { r = r * 200 / m; g = g * 200 / m; b = b * 200 / m; }
+    }
+    if (r > 255) r = 255;
+    if (g > 255) g = 255;
+    if (b > 255) b = 255;
+    *rgb = ((u32)r << 16) | ((u32)g << 8) | (u32)b;
+    return true;
+}
+
+bool art_color(u32 *rgb)
+{
+    if (!g_color_ok) return false;
+    *rgb = g_color;
+    return true;
+}
+
+static bool build_texture(const unsigned char *data, size_t size, bool real)
+{
+    unsigned char *buf = malloc((size_t)ART_SIZE * ART_SIZE * 4);
+    if (!buf) return false;
+    bool ok = art_decode(data, size, buf) && art_upload(&g_tex, buf);
+    if (ok && real) g_color_ok = art_color_of(buf, &g_color);
+    free(buf);
+    if (!ok) return false;
     g_img.tex = &g_tex;
     g_img.subtex = &g_sub;
     return true;
@@ -141,14 +224,17 @@ void art_commit(void)
     g_pending_flag = false;
 
     release_tex();
-    if (g_pending && g_pending_size) g_have = build_texture(g_pending, g_pending_size);
-    if (!g_have && g_default && g_default_size) g_have = build_texture(g_default, g_default_size);
+    g_serial++;
+    g_color_ok = false;
+    if (g_pending && g_pending_size) g_have = build_texture(g_pending, g_pending_size, true);
+    if (!g_have && g_default && g_default_size) g_have = build_texture(g_default, g_default_size, false);
     free(g_pending);
     g_pending = NULL;
     g_pending_size = 0;
 }
 
 bool art_ready(void) { return g_have; }
+unsigned art_serial(void) { return g_serial; }
 const C2D_Image *art_image(void) { return &g_img; }
 
 void art_shutdown(void)

@@ -20,6 +20,10 @@ typedef struct {
 
 typedef struct { int idx; char path[512]; } FlowWant;
 
+/* Colour of the screen background at (x, y) as C2D_Color32: lets covers dim / reflect into whatever
+ * is really behind them (a plain gradient, or the ambient glow). */
+typedef u32 (*FlowBgFn)(float x, float y);
+
 void flow_init(const unsigned char *placeholder_png, size_t size);
 void flow_shutdown(void);
 void flow_reset(void);                         /* folder changed: forget every cached cover */
@@ -27,7 +31,8 @@ bool flow_pump(void);                          /* once per frame (main thread): 
 bool flow_known(int idx);                      /* cached, or being loaded right now */
 void flow_want(const FlowWant *w, int n);      /* replace the load queue (nearest first) */
 C3D_Tex *flow_tex(int idx, float *fade);       /* cached cover (or placeholder) or NULL */
+bool flow_color(int idx, u32 *rgb);            /* ambient colour (0xRRGGBB) of a loaded cover with real artwork */
 
 /* items[i] is the entry with index base+i.  pos = fractional centre index,
- * appear = 0..1 (0 collapses the side covers into the centre), bg = background colour. */
-void flow_draw(const FlowItem *items, int n, int base, float pos, float appear, u32 bg);
+ * appear = 0..1 (0 collapses the side covers into the centre), bg = background colour lookup. */
+void flow_draw(const FlowItem *items, int n, int base, float pos, float appear, FlowBgFn bg);
