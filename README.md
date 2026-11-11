@@ -28,7 +28,7 @@ times); scroll the list again and the covers fan back out. Songs without art sho
 A short branded splash shows the app mark and **MADE BY GRIMZZZZ** on launch. The background around the
 cover carries an **ambient glow** taken from the artwork's dominant colour: it follows the cover in the
 middle of the screen and fades smoothly between covers. Folders and covers without art glow in your accent
-colour. Turn it off, or pick *Soft* / *Vivid*, in Settings > Appearance > *Ambient glow*.
+colour. Turn it off, or pick *Soft* / *Vivid*, in Settings > Look > *Ambient glow*.
 
 **Bottom screen** - folder + music browser (starts in `SD:/Music/`) with a **search bar** and a
 **Favorites** heart in the header. The playing song is highlighted. Touch controls sit along the bottom:
@@ -40,7 +40,7 @@ when on; repeat-one shows a small "1".
 | Control | Action |
 |---|---|
 | **L / R** | Previous / next song (previous restarts the song if more than 3 s have played); the list highlight follows the playing song |
-| **D-pad Left / Right** | Skip back / forward (default 5 s, hold to keep skipping; past the end of a song = next track). Length is set in Settings > General > *Skip length*. In Settings: adjust the selected value |
+| **D-pad Left / Right** | Skip back / forward (default 5 s, hold to keep skipping; past the end of a song = next track). Length is set in Settings > Player > *Skip length*. In Settings: adjust the selected value |
 | **D-pad Up / Down** | Move through the list (hold to scroll fast) |
 | **A** | Play the selected song; open the selected folder (or `..` to go up); resume if paused. In Settings: step the selected value |
 | **B** | Pause. Closes Settings / Up Next |
@@ -85,13 +85,13 @@ folders, for the best results.
 
 ### Settings (SELECT)
 
-Three tabs:
+Four tabs:
 
-- **Appearance** - a theme preset (Noise, Emerald, Ocean, Sunset, Mono), **Ambient glow** (Off / Soft /
-  Vivid), **Cover fade** (Quick / Smooth / Slow), **Now playing display** (Album cover / Spectrum / Waveform /
-  Orbit) and five wallpaper treatments (Midnight / Carbon / Aurora / Violet / Ember). Visualizers and
-  wallpapers use lightweight 2D drawing instead of large textures, so they suit the Old 3DS. Theme colours
-  are coordinated automatically; there is no separate accent picker.
+- **Look** - a theme preset (Noise, Neon, Emerald, Ocean, Sunset, Mono), **OLED black** (true-black background
+  with neon accents and glowing text), **Glow color** (Auto, Cyan, Mint, Amber, Magenta, Violet, Crimson, Ice -
+  tints the ambient glow, the halos around panels and the NOW PLAYING glow), **Ambient glow** (Off / Soft /
+  Vivid), **Album colors** (the accent follows the playing cover; switch it off to keep your theme colour) and
+  five wallpaper treatments. Everything uses lightweight 2D drawing, so it suits the Old 3DS.
 - **Audio** - a **Manual EQ** switch and a **5-band equalizer** drawn as five vertical sliders (60 Hz,
   230 Hz, 910 Hz, 3.6 kHz, 14 kHz; -12..+12 dB, gain shown above each slider), plus presets (Flat, Bass Boost,
   Treble, Vocal, Rock, Pop).
@@ -101,14 +101,54 @@ Three tabs:
     remembered while you switch back and forth.
   - Drag a slider with the stylus or a finger; with the D-pad, Left/Right picks the band, Up/Down changes its
     gain, and A (or Left / Right past the first / last band) leaves the sliders.
-- **General** - **Skip length** (5 / 10 / 15 / 30 s), **Clock** (off / 12-hour / 24-hour), **Battery
-  percentage**, a **Sleep timer** switch with a 5 / 10 / 15 / 30 / 45 / 60-minute duration (the countdown shows
-  on the top screen; changing the duration restarts a running timer), **Show setup guide** and **Exit app**
-  (asks for confirmation).
+- **Player** - **Visualizer** (Cover / LED Spectrum / Scope / VU Deck - the three visualizers are full-width,
+  retro car-stereo style displays), **Cover fade**, **Track info** (elapsed, length, format and bitrate),
+  **Remember song** (reopens on the last song and position) and **Skip length** (5 / 10 / 15 / 30 s).
+- **General** - **Clock** (off / 12-hour / 24-hour), **Battery** (on / off) with a **Battery style** (Icon /
+  Percent), **Battery saver**, a **Sleep timer** switch with a 5 / 10 / 15 / 30 / 45 / 60-minute duration (the
+  countdown shows on the top screen; changing the duration restarts a running timer), **Show setup guide** and
+  **Exit app** (asks for confirmation).
+
+**Battery saver** draws at 30 fps, simplifies the visualizers, dims the glow, turns off the breathing / pop
+animations and screen fades, and polls the battery less often.
+
+**Top screen**: one header bar (PROJECT NOISE, clock, battery), the cover, then **NOW PLAYING** / **BROWSING**
+directly under it (the NOW PLAYING label glows while music plays). On the Now Playing view two small cards beside
+the cover show elapsed / length and format / bitrate; the visualizer displays carry the same read-out in their
+title strip. Audio format is taken from the file type and the bitrate is the file's average bitrate.
 
 Everything saves automatically to `SD:/3ds/PROJECT_NOISE/settings.cfg` - theme and options, shuffle, repeat,
-EQ and the last folder - and is restored on the next launch. Closing the lid pauses playback; opening it
+EQ and the last folder - and is restored on the next launch. The last song and its position are kept in
+`SD:/3ds/PROJECT_NOISE/resume.cfg`; on the next launch it is shown paused at that spot and Play continues from there. Closing the lid pauses playback; opening it
 resumes.
+
+**Lyrics** - tap **LYRICS** (next to the search bar) while a song is loaded. Lyrics are found in this order:
+`<song>.lrc` next to the file, the SD cache `SD:/3ds/PROJECT_NOISE/lyrics/`, then online: LRCLIB, an optional
+external service, and lyrics.ovh. Artist / title come from the file's tags (ID3, Vorbis comments, WAV INFO), or
+from an `Artist - Title` file name. Remixes, covers, live and karaoke versions are rejected unless the song itself is
+one, and the length must match. Synchronized (LRC) lyrics highlight the current line and scroll with the song;
+plain lyrics scroll with the D-pad. Searching runs on a background thread, so playback never waits for it.
+Settings > Lyrics: *Automatic search* (look online when the lyrics screen opens; off = press A), *Auto download*
+(keep results in the SD cache; off = shown only), *Offline only* (cache and `.lrc` files only), *Prefer synced*,
+*Clear lyrics cache*. Songs nobody has are remembered for 7 days so they are not searched again.
+
+The Old 3DS system TLS stack is outdated and may refuse some HTTPS sites. If that happens the lyrics screen says it
+could not reach the servers; point the app at a small service of your own by creating
+`SD:/3ds/PROJECT_NOISE/lyrics.cfg`:
+
+```
+proxy=https://your-service.example/lyrics     # plain http:// also works
+token=optional-secret                           # sent as "Authorization: Bearer <token>"
+insecure_tls=0                                  # 1 = skip certificate checks (not recommended)
+```
+
+The service receives `GET <proxy>?artist_name=..&track_name=..&duration=<seconds>&synced=0|1` and answers with
+LRCLIB-style JSON: one object or an array of `{trackName, artistName, duration, plainLyrics, syncedLyrics}`
+(or just `{"lyrics": "..."}`). No key is built into the app.
+
+**Loading screen** - a Windows-style window with a progress bar and the current task. It loads the audio engine,
+UI assets, the music folder, the last song, the selected song's tags + cover and its *cached* lyrics (never online);
+all other covers keep loading in the background.
 
 ### First launch
 
@@ -212,6 +252,7 @@ Note that makerom limits `BasicInfo/Title` to 8 characters.
 ```
 source/main.c        UI, input, playlist + Up Next, favorites, ambient glow, settings (incl. vertical EQ),
                      search UI, first-run setup, clock / battery, sleep timer
+source/lyrics.c      lyrics: ID3/filename identification, LRC parser, SD cache, background HTTPS lookup + matching
 source/search.c      song search: one-time index of SD:/Music/ (recursive) + in-memory filter
 source/audio.c       minimp3 / dr_flac / WAV decode thread -> ndsp channel 0, 5-band EQ, position tracking
 source/meta.c        ID3v2/v1, Vorbis comment and WAV tag parsing, artwork extraction, duration probe

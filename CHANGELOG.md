@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Added (lyrics + loading screen)
+- **Lyrics**: LYRICS button, synced (LRC) and plain lyrics, SD cache, `.lrc` sidecar files, background online
+  lookup (LRCLIB, optional external service via `lyrics.cfg`, lyrics.ovh) with strict artist / title / length matching.
+- Settings > **Lyrics** tab: automatic search, auto download, offline only, prefer synced, clear cache.
+- **Windows-style loading screen** with real progress: preloads tags and cover of the selected song, the last
+  song and its cached lyrics; the rest loads in the background. Replaces the fixed 1.2 s splash.
+
+### Added (UI update)
+- **One seamless top bar**: PROJECT NOISE, clock and battery always share a single bar, whatever the clock setting.
+- **Battery icon** with a level fill (amber / red when low, bolt while charging); Settings > General > *Battery
+  style* switches between the icon and a percentage.
+- **NOW PLAYING / BROWSING** label moved under the cover, larger, cross-fading, and glowing while music plays.
+- **Glow color** presets (Settings > Look), **Album colors** (accent follows the cover) and **OLED black**.
+- **Retro head-unit visualizers** (LED Spectrum, Scope, VU Deck): full width, bezel + dark glass, segmented
+  LEDs with peak hold, scale markings, analogue needles, standby shimmer.
+- **Music information**: elapsed, length, format and bitrate (cards beside the cover / visualizer title strip).
+- **Playback memory**: last song and position restored on launch (paused; Play resumes from the spot).
+- **Battery saver**: 30 fps drawing, lighter visualizers and glow, no breathing / pop / fade animations.
+- Smooth animations: bottom-screen page fades, sliding tab highlight, gliding switches, button pop, toast slide,
+  artwork settle + bass breathing.
+- Settings now has four tabs (Look / Audio / Player / General); every new feature has its own control.
+
 ### Changed (UI, round 3)
 - **Top screen lighting**: the ambient glow was not actually being drawn on the redesigned top screen. It is now
   rendered behind everything, tinted by the album art, and gently breathes with the bass. The screen outline is

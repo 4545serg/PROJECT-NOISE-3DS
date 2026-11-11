@@ -26,6 +26,17 @@ typedef struct {
     bool shuffle;
     int  sleep_minutes;              /* sleep timer selection: 5, 10, 15, 30, 45 or 60 */
     int  repeat;                     /* 0 = off, 1 = all, 2 = one         */
+    int  glow_color;                 /* 0 = Auto (album / theme), else a GLOWCOL preset */
+    bool dyn_color;                  /* accent colours follow the playing album artwork */
+    int  batt_style;                 /* 0 = battery icon, 1 = percentage only */
+    bool oled;                       /* true-black interface */
+    bool saver;                      /* battery saver: fewer effects, 30 fps drawing */
+    bool show_info;                  /* music information (format / bitrate / times) */
+    bool resume;                     /* remember the last song + position */
+    bool ly_search;                  /* lyrics: look online automatically when the lyrics screen opens */
+    bool ly_download;                /* lyrics: keep downloaded lyrics in the SD cache */
+    bool ly_offline;                 /* lyrics: never use the network, cache only */
+    bool ly_sync;                    /* lyrics: prefer synchronized (LRC) lyrics */
     int  ui_ver;                     /* settings-file UI version (2 = Noise blue default theme) */
     char last_dir[512];              /* last browsed folder               */
 } Settings;
@@ -35,6 +46,9 @@ extern const char *PRESET_NAMES[PRESET_COUNT];
 
 #define GLOW_COUNT 3
 extern const char *GLOW_NAMES[GLOW_COUNT];
+#define GLOWCOL_COUNT 8
+extern const char *GLOWCOL_NAMES[GLOWCOL_COUNT];
+extern const unsigned GLOWCOL_RGB[GLOWCOL_COUNT];     /* index 0 (Auto) is unused */
 #define FADE_COUNT 3
 extern const char *FADE_NAMES[FADE_COUNT];
 extern const float FADE_SECS[FADE_COUNT];

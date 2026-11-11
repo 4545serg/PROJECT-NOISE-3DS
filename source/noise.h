@@ -6,3 +6,4 @@
 #define DATA_DIR      "sdmc:/3ds/PROJECT_NOISE"
 #define SETTINGS_PATH "sdmc:/3ds/PROJECT_NOISE/settings.cfg"
 #define FAVORITES_PATH "sdmc:/3ds/PROJECT_NOISE/favorites.txt"
+#define RESUME_PATH   "sdmc:/3ds/PROJECT_NOISE/resume.cfg"
