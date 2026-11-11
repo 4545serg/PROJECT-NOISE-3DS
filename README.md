@@ -1,133 +1,198 @@
 # PROJECT NOISE
 
-A native MP3 / FLAC / WAV player for the Nintendo 3DS family, written in C against libctru + citro2d.
+A native **MP3 / FLAC / WAV** player for the Nintendo 3DS family, written in C against libctru + citro2d.
 Targets **Old 3DS / 3DS XL / 2DS** (no New 3DS features required; New 3DS simply runs it faster).
 
-> **Build status:** the source was written and checked on a machine without the 3DS
-> toolchain, so no `.3dsx` / `.cia` binary has been produced or run on hardware yet.
-> Section 3 gets you both files without installing anything locally. Expect to report
-> back build errors or hardware quirks - the code has had host-side syntax/type checks
-> and parser tests only.
+> **Build status:** the source was written and checked on a machine without the 3DS toolchain, so no
+> `.3dsx` / `.cia` has been produced or run on hardware yet. The code has had host-side syntax and
+> parser checks only. Section 3 builds both files without installing anything locally - expect to
+> report back build errors or hardware quirks.
+
+## Contents
+
+1. [What it does](#1-what-it-does)
+2. [Putting music on the SD card](#2-putting-music-on-the-sd-card)
+3. [Building](#3-building)
+4. [Installing](#4-installing)
+5. [Troubleshooting](#5-troubleshooting)
+6. [Source layout](#6-source-layout)
 
 ## 1. What it does
 
-**Top screen:** a *NOW PLAYING* header, then a Cover Flow of the album art (3 covers each side) around the highlighted song in the library
-(covers load on a background thread, so scrolling stays smooth, and are cached on the SD card
-in `SD:/3ds/PROJECT_NOISE/covers/` so they appear instantly next time - delete the folder to clear it). Picking a song folds the side covers away
-and leaves the now-playing view (art, title, artist, progress bar, times); scroll the list
-again and the covers fan back out. Songs without art show the animated logo cover.
+**Top screen** - a *NOW PLAYING* header and a **Cover Flow** of album art (3 covers each side) around the
+highlighted song. Covers load on a background thread, so scrolling stays smooth, and are cached on the SD
+card in `SD:/3ds/PROJECT_NOISE/covers/` so they appear instantly next time (delete the folder to clear it).
+Picking a song folds the side covers away and leaves the now-playing view (art, title, artist, progress bar,
+times); scroll the list again and the covers fan back out. Songs without art show the default logo cover.
 
-**Bottom screen:** folder + music browser (starts in `SD:/Music/`) with a **search bar** in the header, the playing
-song is highlighted, touch controls: shuffle / previous / play-pause / next / repeat / menu (shuffle and repeat sit on
-either side of the transport buttons and light up, with a dot underneath, when on; repeat-one shows a small "1").
+A short branded splash shows the app mark and **MADE BY GRIMZZZZ** on launch. The background around the
+cover carries an **ambient glow** taken from the artwork's dominant colour: it follows the cover in the
+middle of the screen and fades smoothly between covers. Folders and covers without art glow in your accent
+colour. Turn it off, or pick *Soft* / *Vivid*, in Settings > Appearance > *Ambient glow*.
+
+**Bottom screen** - folder + music browser (starts in `SD:/Music/`) with a **search bar** and a
+**Favorites** heart in the header. The playing song is highlighted. Touch controls sit along the bottom:
+shuffle / previous / play-pause / next / repeat / Up Next. Shuffle and repeat light up with a dot underneath
+when on; repeat-one shows a small "1".
+
+### Controls
 
 | Control | Action |
 |---|---|
-| **L / R** | Skip 5 seconds back / forward (past the end of a song = next track) |
-| **A** | Play the selected song (opens the selected folder, or `..` to go up; resumes if paused) |
-| **B** | Pause |
-| **D-pad Up/Down** | Move through the list (hold to scroll fast) |
-| **D-pad Left/Right** | Page up/down in the list; in settings: adjust the value |
-| **SELECT** | Open / close settings |
-| **START** | Exit (asks "Exit PROJECT NOISE?" first; press START again or A on *Exit* to leave) |
-| **X** | Search (opens the on-screen keyboard) |
-| **Y** | Shuffle on / off (repeat: tap the repeat button on the touch screen) |
-| **Touch** | Tap a row to open/play, drag to scroll, tap the search bar or the on-screen buttons |
+| **L / R** | Previous / next song (previous restarts the song if more than 3 s have played); the list highlight follows the playing song |
+| **D-pad Left / Right** | Skip back / forward (default 5 s, hold to keep skipping; past the end of a song = next track). Length is set in Settings > General > *Skip length*. In Settings: adjust the selected value |
+| **D-pad Up / Down** | Move through the list (hold to scroll fast) |
+| **A** | Play the selected song; open the selected folder (or `..` to go up); resume if paused. In Settings: step the selected value |
+| **B** | Pause. Closes Settings / Up Next |
+| **X** | Add the selected song to the **front** of Up Next (plays next) |
+| **Y** | Add the selected song to the **end** of Up Next |
+| **ZL** | Favorite / unfavorite the selected song |
+| **SELECT** | Open / close Settings |
+| **START** | Exit - asks "Exit PROJECT NOISE?" first (press START again, or A on *Exit*, to leave) |
+| **Touch** | Tap a row to open/play, drag to scroll, tap the search bar, the header heart, the transport controls or the Up Next button; drag the seek bar to jump around in a song |
 
-Music keeps playing while you browse folders or change settings. When a track ends the
-next one starts (respecting shuffle/repeat). The on-screen previous / next buttons change track; previous restarts the track if more than
-3 s have played.
+Music keeps playing while you browse folders or change settings. When a track ends the next one starts
+(respecting shuffle / repeat). The 3DS hardware volume slider controls loudness.
+
+### Up Next
+
+Press **Y** on a song to queue it, or **X** to make it play next. Tap the queue icon at the right of the
+mini-player to open the **Up Next** screen: tap an item (or press A) to play it immediately, tap the **×**
+on a row to remove it, tap **Done** (or press B) to go back. The mini-player and its transport controls stay
+available there, and X / Y do nothing destructive on that screen. Re-adding a queued song moves it instead
+of duplicating it.
+
+### Favorites
+
+Tap the **♥** at the right of a song row, or press **ZL** on the selected song, to favorite or unfavorite it. Tap
+the heart in the header (next to the title) to switch to the Favorites list, which plays and shuffles like any
+other playlist. Favorites are saved to
+`SD:/3ds/PROJECT_NOISE/favorites.txt`.
 
 ### Searching
 
-Tap the **Search songs** bar (or press **X**) and type with the 3DS keyboard. The search covers **every song under
-`SD:/Music/`, including all sub-folders**, and matches against file and folder names, ignoring case; every word you type
-has to match, so `daft punk` finds `Daft Punk/Discovery/01 One More Time.mp3` and `radio ok` finds the OK Computer tracks.
-Songs whose own file name matches are listed first. The result list works like any folder: tap or press A to play, the
-cover flow follows your selection, and next / previous / shuffle / repeat move through the results. Tap the **x** in the
-search bar (or the **Back** row) to return to the folder you searched from. The first search of a session reads the Music
-folder once ("Searching..." for a moment on big libraries); after that, searches are instant.
-It searches names, not ID3 tags - name your files `Artist - Title.mp3` (or keep them in Artist/Album folders) for best results.
+Tap the **Search songs** bar and type with the 3DS keyboard. The search covers **every song under
+`SD:/Music/`, including all sub-folders**, and matches file and folder names, ignoring case. Every word you
+type has to match, so `daft punk` finds `Daft Punk/Discovery/01 One More Time.mp3` and `radio ok` finds the
+OK Computer tracks. Songs whose own file name matches are listed first.
 
-**Settings (SELECT or the menu button):** three tabs.
-- **Look** - a theme preset (Noise, Emerald, Ocean, Sunset, Mono) and an accent colour swatch.
-- **Sound** - volume, a **Manual EQ** switch and a **5-band equalizer** shown as five **vertical sliders** (60 Hz, 230 Hz,
-  910 Hz, 3.6 kHz, 14 kHz, -12..+12 dB, with the gain above each slider) and presets (Flat, Bass Boost, Treble, Vocal, Rock, Pop).
-  Manual EQ **off**: the chosen preset plays and the sliders show its curve (greyed, locked; touching one reminds you to turn Manual EQ on).
-  Manual EQ **on**: your own slider settings play (the preset selector reads "User"). Your manual curve is
-  remembered while you switch back and forth. Drag a slider up / down with the stylus or a finger; with the D-pad,
-  Left/Right picks the band, Up/Down changes its gain, and A (or Left / Right past the first / last band) leaves the sliders.
-- **General** - **Clock** (off / 12-hour / 24-hour) and **Battery percentage**, shown in the top-screen corners;
-  **Show setup guide** (replays the first-run guide); **Play with lid closed** (keeps the 3DS awake so music continues when you close it;
-  uses more battery) and **Exit app** (asks for confirmation).
+The result list works like any folder: tap or press A to play, the cover flow follows your selection, and
+next / previous / shuffle / repeat move through the results. Tap the **x** in the search bar (or the **Back**
+row) to return to the folder you searched from. The first search of a session reads the Music folder once
+("Searching..." for a moment on big libraries); after that, searches are instant.
+It searches *names*, not ID3 tags - name your files `Artist - Title.mp3`, or keep them in Artist/Album
+folders, for the best results.
 
-Everything saves automatically to `SD:/3ds/PROJECT_NOISE/settings.cfg`, along with
-shuffle, repeat, EQ, lid setting and the last folder, and is restored on next launch.
+### Settings (SELECT)
 
-**First launch:** a short setup and guide runs once (welcome + sound/music-folder check, Look, Sound,
-Extras for clock / battery / lid, Controls, Done). Use the touch buttons or A = Next, B = Back; *Skip* leaves it early.
-Replay it any time from Settings > General > *Show setup guide*.
+Three tabs:
+
+- **Appearance** - a theme preset (Noise, Emerald, Ocean, Sunset, Mono), **Ambient glow** (Off / Soft /
+  Vivid), **Cover fade** (Quick / Smooth / Slow), **Now playing display** (Album cover / Spectrum / Waveform /
+  Orbit) and five wallpaper treatments (Midnight / Carbon / Aurora / Violet / Ember). Visualizers and
+  wallpapers use lightweight 2D drawing instead of large textures, so they suit the Old 3DS. Theme colours
+  are coordinated automatically; there is no separate accent picker.
+- **Audio** - a **Manual EQ** switch and a **5-band equalizer** drawn as five vertical sliders (60 Hz,
+  230 Hz, 910 Hz, 3.6 kHz, 14 kHz; -12..+12 dB, gain shown above each slider), plus presets (Flat, Bass Boost,
+  Treble, Vocal, Rock, Pop).
+  - Manual EQ **off**: the chosen preset plays and the sliders show its curve (greyed and locked; touching one
+    reminds you to turn Manual EQ on).
+  - Manual EQ **on**: your own slider settings play and the preset selector reads "User". Your manual curve is
+    remembered while you switch back and forth.
+  - Drag a slider with the stylus or a finger; with the D-pad, Left/Right picks the band, Up/Down changes its
+    gain, and A (or Left / Right past the first / last band) leaves the sliders.
+- **General** - **Skip length** (5 / 10 / 15 / 30 s), **Clock** (off / 12-hour / 24-hour), **Battery
+  percentage**, a **Sleep timer** switch with a 5 / 10 / 15 / 30 / 45 / 60-minute duration (the countdown shows
+  on the top screen; changing the duration restarts a running timer), **Show setup guide** and **Exit app**
+  (asks for confirmation).
+
+Everything saves automatically to `SD:/3ds/PROJECT_NOISE/settings.cfg` - theme and options, shuffle, repeat,
+EQ and the last folder - and is restored on the next launch. Closing the lid pauses playback; opening it
+resumes.
+
+### First launch
+
+A three-step setup runs once: (1) welcome plus a check that sound and the music folder are ready, (2) **Make it
+yours** - theme, ambient glow, clock and battery on one page, with the top screen showing the result live, (3)
+a controls cheat-sheet. Use the touch buttons or **A** = Next, **B** = Back; *Skip* leaves early. Replay it any
+time from Settings > General > *Show setup guide*.
+
+### Limits
+
+| What | Limit |
+|---|---|
+| Entries listed per folder / search result | 2,000 |
+| Songs remembered by the search index | 30,000 (about 12 folder levels deep) |
+| Up Next queue | 64 songs |
+| Favorites | 512 songs |
 
 ## 2. Putting music on the SD card
 
 1. Power off the console and put its SD card in your PC (FAT32, as formatted by the 3DS).
-2. Create (or let the app create on first launch) the folder `Music` at the top level:
-   `SD:/Music/`.
+2. Create (or let the app create on first launch) the folder `Music` at the top level: `SD:/Music/`.
 3. Copy `.mp3`, `.flac` or `.wav` files there. Sub-folders are fine, e.g. `SD:/Music/Artist/Album/01 Song.mp3`.
 4. Put the card back and launch the app. It lists only folders and `.mp3` / `.flac` / `.wav` files.
 
-Tips
-- Formats: MP3, FLAC (up to 8 channels, mixed down to stereo) and uncompressed WAV (8/16/24/32-bit PCM or 32-bit float).
-  FLAC reads Vorbis comments + embedded pictures; WAV reads LIST/INFO tags. Hi-res FLAC (96 kHz+) may stutter on Old 3DS.
-- Titles/artists come from ID3 tags (ID3v2.2/2.3/2.4, falling back to ID3v1, then the
-  file name). Fix wrong tags with a tag editor such as Mp3tag or Kid3.
-- Album art is read from the embedded ID3v2 picture (JPEG or PNG). To keep memory use low
-  on Old 3DS, pictures above ~1.2 megapixels (about 1100x1100) are skipped and the
-  placeholder is shown - re-embed a 500-600 px cover for best results. Baseline (non-progressive)
-  JPEGs load fastest. Loading a cover can pause the UI for a moment (audio keeps playing).
-- Skipping with L / R is exact for FLAC and WAV; for MP3 it is estimated from file position, so VBR files can land
-  a little off.
-- Duration uses the Xing/VBRI header when present, otherwise a bitrate estimate, so it can
-  be slightly off for some VBR files without a header.
-- **Sound requires the DSP firmware** at `SD:/3ds/dspfirm.cdc`. If the top screen says
-  "dspfirm.cdc missing", run the *DSP1* homebrew once to dump it.
+**Tips**
+
+- **Formats:** MP3, FLAC (up to 8 channels, mixed down to stereo) and uncompressed WAV (8/16/24/32-bit PCM or
+  32-bit float). FLAC reads Vorbis comments and embedded pictures; WAV reads LIST/INFO tags. Hi-res FLAC
+  (96 kHz and up) may stutter on Old 3DS.
+- **Tags:** titles and artists come from ID3 tags (ID3v2.2 / 2.3 / 2.4, falling back to ID3v1, then the file
+  name). Fix wrong tags with a tag editor such as Mp3tag or Kid3.
+- **Album art** is read from the embedded ID3v2 picture (JPEG or PNG). To keep memory use low on Old 3DS,
+  pictures above ~1.2 megapixels (about 1100x1100) are skipped and the placeholder is shown - re-embed a
+  500-600 px cover for best results. Baseline (non-progressive) JPEGs load fastest. Loading a cover can pause
+  the UI for a moment (audio keeps playing).
+- **Skipping** with D-pad Left / Right is exact for FLAC and WAV; for MP3 it is estimated from the file
+  position, so VBR files can land a little off.
+- **Duration** uses the Xing/VBRI header when present, otherwise a bitrate estimate, so it can be slightly off
+  for some VBR files without a header.
+- **Sound requires the DSP firmware** at `SD:/3ds/dspfirm.cdc`. If the top screen says "dspfirm.cdc missing",
+  run the *DSP1* homebrew once to dump it.
 
 ## 3. Building
 
 ### A. Easiest - GitHub builds it for you (nothing to install)
+
 1. Create a GitHub repository and upload this whole folder (including `.github/`).
-2. Open the **Actions** tab -> *Build PROJECT NOISE* -> it runs on every push
-   (or press *Run workflow*).
-3. Download the artifacts: `PROJECT-NOISE-3DSX` (the `.3dsx` + `.smdh`). To make a CIA, see C.
+2. Open the **Actions** tab -> *Build PROJECT NOISE*. It runs on every push (or press *Run workflow*).
+3. Download the `PROJECT-NOISE-3DSX` artifact (the `.3dsx` + `.smdh`) and, if the best-effort CIA step
+   succeeded, `PROJECT-NOISE-CIA` (the `.cia`). Otherwise see C.
 
 ### B. Locally with devkitPro
+
 1. Install devkitPro (https://devkitpro.org/wiki/Getting_Started) and the 3DS packages:
    `dkp-pacman -S 3ds-dev`
-2. In a devkitPro shell (MSYS2 on Windows) in this folder:
+2. In a devkitPro shell (MSYS2 on Windows), in this folder:
    ```
-   sh tools/get_deps.sh     # downloads minimp3.h, stb_image.h and dr_flac.h (or: make deps)
-   make                     # -> project_noise.3dsx
+   make deps     # downloads minimp3.h, stb_image.h and dr_flac.h (make also does this on demand)
+   make          # -> project_noise.3dsx
    ```
-   If you cannot run the script, download `minimp3.h` (lieff/minimp3), `stb_image.h`
-   (nothings/stb) and `dr_flac.h` (mackron/dr_libs) into `source/` by hand.
+   If you cannot run the script, download `minimp3.h` (lieff/minimp3), `stb_image.h` (nothings/stb) and
+   `dr_flac.h` (mackron/dr_libs) into `source/` by hand.
+
+   The decoder headers are fetched from each project's `master` branch by default. For a reproducible build,
+   pin them: `MINIMP3_REF=<commit> STB_REF=<commit> DRLIBS_REF=<commit> make deps`.
 
 ### C. The CIA locally
-`make cia` needs **makerom** and **bannertool** on your PATH (prebuilt Windows/Linux
-builds are widely available; sources: 3DSGuy/Project_CTR and Steveice10/bannertool). Then:
+
+`make cia` needs **makerom** and **bannertool** on your PATH (prebuilt Windows/Linux builds are widely
+available; sources: 3DSGuy/Project_CTR and Steveice10/bannertool):
 ```
-make cia                 # -> project_noise.cia
+make cia      # -> project_noise.cia
 ```
-`resources/app.rsf` holds the title ID (`0x7C531`), 64 MB application memory (Old 3DS
-compatible) and the `dsp::DSP` service the audio needs. Change `UniqueId` if it clashes
-with another title you have installed.
+`resources/app.rsf` holds the title ID (`0x7C531`), 64 MB application memory (Old 3DS compatible) and the
+`dsp::DSP` service the audio needs. Change `UniqueId` if it clashes with another title you have installed.
+Note that makerom limits `BasicInfo/Title` to 8 characters.
 
 ## 4. Installing
 
-- **3DSX (testing):** copy `project_noise.3dsx` (and the `.smdh`) to `SD:/3ds/` and launch
-  from the Homebrew Launcher.
-- **CIA:** copy `project_noise.cia` anywhere on the SD card (e.g. `SD:/cias/`), open
-  **FBI** -> *SD* -> select the file -> *Install CIA* (then *Delete* the file if you like).
-  The app appears on the HOME Menu as PROJECT NOISE.
+- **3DSX (testing):** copy `project_noise.3dsx` (and the `.smdh`) to `SD:/3ds/` and launch it from the
+  Homebrew Launcher.
+- **CIA:** copy `project_noise.cia` anywhere on the SD card (e.g. `SD:/cias/`), open **FBI** -> *SD* -> select
+  the file -> *Install CIA* (then *Delete* the file if you like). The app appears on the HOME Menu as
+  PROJECT NOISE.
 
 ## 5. Troubleshooting
 
@@ -138,21 +203,28 @@ with another title you have installed.
 | Search finds nothing | It matches file / folder names under `SD:/Music/` (not ID3 tags), and every typed word must match |
 | Stutter on very high bitrate files | Decoding runs on the main CPU core at 268 MHz; 320 kbps CBR/VBR is the practical upper end - re-encode at 192-256 kbps if needed |
 | Placeholder instead of cover | Cover is not JPEG/PNG, is too large, or is not embedded as an ID3v2 picture |
-| Settings not remembered | SD card is write-protected or full |
+| Settings or favorites not remembered | SD card is write-protected or full |
+| Covers look stale after retagging | Delete `SD:/3ds/PROJECT_NOISE/covers/` to clear the cache |
+| `make` fails downloading headers | Check your connection, or download the three headers into `source/` by hand (see 3B) |
 
 ## 6. Source layout
 
 ```
-source/main.c      UI, input, playlist logic, settings page (incl. vertical EQ), search UI, first-run setup, clock/battery
-source/search.c    song search: one-time index of SD:/Music/ (recursive) + in-memory filter
-source/audio.c     minimp3 / dr_flac / WAV decode thread -> ndsp channel 0, position tracking
-source/meta.c      ID3v2/v1 parsing, artwork extraction, duration probe
-source/art.c       JPEG/PNG -> 128x128 tiled GPU texture (decode + upload split)
-source/flow.c      Cover Flow: perspective drawing, background cover loader, SD thumbnail cache
-source/browser.c   folder listing / sorting
-source/settings.c  theme + preferences, autosave file
-resources/         app.rsf, icon, banner (generated by tools/make_assets.py)
-tools/             get_deps.sh, make_assets.py
+source/main.c        UI, input, playlist + Up Next, favorites, ambient glow, settings (incl. vertical EQ),
+                     search UI, first-run setup, clock / battery, sleep timer
+source/search.c      song search: one-time index of SD:/Music/ (recursive) + in-memory filter
+source/audio.c       minimp3 / dr_flac / WAV decode thread -> ndsp channel 0, 5-band EQ, position tracking
+source/meta.c        ID3v2/v1, Vorbis comment and WAV tag parsing, artwork extraction, duration probe
+source/art.c         JPEG/PNG -> 128x128 tiled GPU texture (decode + upload split) + dominant colour for the glow
+source/flow.c        Cover Flow: perspective drawing, background cover loader, SD thumbnail cache
+source/browser.c     folder listing / sorting
+source/settings.c    theme + preferences, atomic autosave (settings.cfg)
+source/noise.h       shared constants (app name, SD paths)
+source/libcfg.h      configuration macros shared by every file that sees minimp3 / stb_image / dr_flac
+source/*impl.c       the single translation units that hold the decoder library implementations
+source/placeholder.h default cover art as a C array (generated by tools/make_cover.py)
+resources/           app.rsf, icon, banner, banner jingle, default cover
+tools/               get_deps.sh, make_assets.py, make_cover.py
 ```
 
 Licenses and attribution: see `LICENSE` and `THIRD_PARTY_NOTICES.md`.
