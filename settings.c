@@ -9,6 +9,7 @@
 typedef struct { const char *name; u32 bg, text, accent, select; } Preset;
 
 static const Preset presets[PRESET_COUNT] = {
+    { "Noise",   0x040A14, 0xEAF2FF, 0x2F8CFF, 0x15366A },   /* the logo blue: default */
     { "Neon",    0x030806, 0xEEF4F2, 0x24FF68, 0x16502C },
     { "Emerald", 0x0A1410, 0xE8F6EE, 0x35D07F, 0x1B3A2C },
     { "Ocean",   0x0B1720, 0xE8F4F8, 0x39B8D6, 0x183A49 },
@@ -17,7 +18,15 @@ static const Preset presets[PRESET_COUNT] = {
 };
 
 const char *PRESET_NAMES[PRESET_COUNT] = {
-    "Neon", "Emerald", "Ocean", "Sunset", "Mono"
+    "Noise", "Neon", "Emerald", "Ocean", "Sunset", "Mono"
+};
+
+const char *GLOWCOL_NAMES[GLOWCOL_COUNT] = {
+    "Auto", "Cyan", "Mint", "Amber", "Magenta", "Violet", "Crimson", "Ice"
+};
+/* soft, slightly desaturated halos that sit well on all six themes (0 = Auto: follows album / theme) */
+const unsigned GLOWCOL_RGB[GLOWCOL_COUNT] = {
+    0x000000, 0x2CCBE8, 0x3CF0A4, 0xFFB43A, 0xF04CC0, 0x9B72FF, 0xFF5A66, 0xCFE6FF
 };
 
 const char *GLOW_NAMES[GLOW_COUNT] = { "Off", "Soft", "Vivid" };
@@ -80,11 +89,23 @@ void settings_defaults(Settings *s)
 {
     memset(s, 0, sizeof(*s));
     settings_apply_preset(s, 0);
+    s->ui_ver = 2;
     s->glow = 2;
     s->seek_step = 5;
     s->fade_speed = 1;
     s->display_mode = 0;
     s->wallpaper = 0;
+    s->glow_color = 0;
+    s->dyn_color = true;
+    s->batt_style = 0;
+    s->oled = false;
+    s->saver = false;
+    s->show_info = true;
+    s->resume = true;
+    s->ly_search = true;
+    s->ly_download = true;
+    s->ly_offline = false;
+    s->ly_sync = true;
     settings_apply_eq_preset(s, 0);
     s->shuffle = false;
     s->sleep_minutes = 15;
@@ -101,6 +122,7 @@ void settings_load(Settings *s)
         f = fopen(backup_path, "r");
     }
     if (!f) return;
+    s->ui_ver = 1;                       /* files written before the Noise theme have no ui_ver */
 
     char line[600];
     while (fgets(line, sizeof(line), f)) {
@@ -148,6 +170,30 @@ void settings_load(Settings *s)
             s->wallpaper = atoi(value);
         else if (!strcmp(key, "seek_step"))
             s->seek_step = atoi(value);
+        else if (!strcmp(key, "glow_color"))
+            s->glow_color = atoi(value);
+        else if (!strcmp(key, "dyn_color"))
+            s->dyn_color = atoi(value) != 0;
+        else if (!strcmp(key, "batt_style"))
+            s->batt_style = atoi(value);
+        else if (!strcmp(key, "oled"))
+            s->oled = atoi(value) != 0;
+        else if (!strcmp(key, "saver"))
+            s->saver = atoi(value) != 0;
+        else if (!strcmp(key, "show_info"))
+            s->show_info = atoi(value) != 0;
+        else if (!strcmp(key, "resume"))
+            s->resume = atoi(value) != 0;
+        else if (!strcmp(key, "ly_search"))
+            s->ly_search = atoi(value) != 0;
+        else if (!strcmp(key, "ly_download"))
+            s->ly_download = atoi(value) != 0;
+        else if (!strcmp(key, "ly_offline"))
+            s->ly_offline = atoi(value) != 0;
+        else if (!strcmp(key, "ly_sync"))
+            s->ly_sync = atoi(value) != 0;
+        else if (!strcmp(key, "ui_ver"))
+            s->ui_ver = atoi(value);
         else if (!strcmp(key, "setup_done"))
             s->setup_done = atoi(value) != 0;
         else if (!strcmp(key, "shuffle"))
@@ -169,6 +215,8 @@ void settings_load(Settings *s)
     if (s->fade_speed < 0 || s->fade_speed >= FADE_COUNT) s->fade_speed = 1;
     if (s->display_mode < 0 || s->display_mode > 3) s->display_mode = 0;
     if (s->wallpaper < 0 || s->wallpaper > 4) s->wallpaper = 0;
+    if (s->glow_color < 0 || s->glow_color >= GLOWCOL_COUNT) s->glow_color = 0;
+    if (s->batt_style < 0 || s->batt_style > 1) s->batt_style = 0;
     {
         bool ok = false;
         for (int i = 0; i < SEEK_STEP_COUNT; i++) if (s->seek_step == SEEK_STEPS[i]) ok = true;
@@ -181,6 +229,11 @@ void settings_load(Settings *s)
         if (s->eq_user[i] > 12) s->eq_user[i] = 12;
     }
     settings_eq_refresh(s);
+    if (s->ui_ver < 2) {                 /* migrate: old Neon (0) becomes the new blue default, others shift by one */
+        if (s->preset == 0) settings_apply_preset(s, 0);
+        else if (s->preset >= 1) s->preset += 1;
+        s->ui_ver = 2;
+    }
     if (s->preset < -1 || s->preset >= PRESET_COUNT) s->preset = -1;
 }
 
@@ -210,6 +263,18 @@ bool settings_save(const Settings *s)
     fprintf(f, "display_mode=%d\n", s->display_mode);
     fprintf(f, "wallpaper=%d\n", s->wallpaper);
     fprintf(f, "seek_step=%d\n", s->seek_step);
+    fprintf(f, "glow_color=%d\n", s->glow_color);
+    fprintf(f, "dyn_color=%d\n", s->dyn_color ? 1 : 0);
+    fprintf(f, "batt_style=%d\n", s->batt_style);
+    fprintf(f, "oled=%d\n", s->oled ? 1 : 0);
+    fprintf(f, "saver=%d\n", s->saver ? 1 : 0);
+    fprintf(f, "show_info=%d\n", s->show_info ? 1 : 0);
+    fprintf(f, "resume=%d\n", s->resume ? 1 : 0);
+    fprintf(f, "ly_search=%d\n", s->ly_search ? 1 : 0);
+    fprintf(f, "ly_download=%d\n", s->ly_download ? 1 : 0);
+    fprintf(f, "ly_offline=%d\n", s->ly_offline ? 1 : 0);
+    fprintf(f, "ly_sync=%d\n", s->ly_sync ? 1 : 0);
+    fprintf(f, "ui_ver=%d\n", s->ui_ver);
     fprintf(f, "setup_done=%d\n", s->setup_done ? 1 : 0);
     fprintf(f, "shuffle=%d\n", s->shuffle ? 1 : 0);
     fprintf(f, "sleep_minutes=%d\n", s->sleep_minutes);

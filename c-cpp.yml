@@ -15,18 +15,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Build Nintendo 3DS application
+      - name: Build Nintendo 3DS application and CIA
         run: |
           docker run --rm \
             -v "$GITHUB_WORKSPACE:/work" \
             -w /work \
             devkitpro/devkitarm:latest \
-            sh -c "make deps && make"
+            sh -c "dkp-pacman -Sy --noconfirm 3ds-tools && make deps && make clean && make && make cia"
 
-      - name: Upload 3DSX build
+      - name: Upload 3DSX and CIA builds
         uses: actions/upload-artifact@v4
         with:
-          name: PROJECT-NOISE-3DSX
+          name: PROJECT-NOISE-3DSX-AND-CIA
           path: |
             project_noise.3dsx
             project_noise.smdh
+            project_noise.cia
+          if-no-files-found: error
