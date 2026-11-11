@@ -35,7 +35,7 @@
 #define VOL_X0     268         /* volume bar inside the volume capsule, x range */
 #define VOL_X1     304
 #define SB_TAP_X   300         /* touches right of this x in the list hit the scrollbar */
-#define SB_X0      38          /* search bar starts after the Home button */
+#define SB_X0      8           /* search bar (full width under the tabs) */
 #define SS_X0      96          /* settings slider track, x range */
 #define SS_X1      244
 
@@ -74,9 +74,9 @@ static const char *PAGE_NAMES[3]         = { "Appearance", "Audio", "General" };
 #define SCR_H   240
 
 /* ambient glow: how strongly the cover colour tints the top screen, and how far it reaches */
-static const float GLOW_STRENGTH[GLOW_COUNT] = { 0.0f, 0.18f, 0.30f };
-#define GLOW_CORE   50.0f      /* half-size of the fully-lit core around the centre cover */
-#define GLOW_REACH  150.0f     /* distance from that core at which the glow has faded out */
+static const float GLOW_STRENGTH[GLOW_COUNT] = { 0.0f, 0.34f, 0.58f };
+#define GLOW_CORE   62.0f      /* half-size of the fully-lit core around the centre cover */
+#define GLOW_REACH  190.0f     /* distance from that core at which the glow has faded out */
 
 /* ----------------------------------------------------------------- state */
 static Settings  S;
@@ -1307,7 +1307,7 @@ static void draw_top(void)
     draw_status_bar();
 
     /* ---- cover area: a lit frame, the cover flow / visualizer inside ---- */
-    neon_box(ART_X - 4, ART_Y - 4, ART_SZ + 8, ART_SZ + 8, 11, 0.07f, cAcc, cGlow, cBg);
+    /* no ring around the cover: the ambient glow behind it (tinted by the artwork) is the frame */
 
     if (!use_flow && S.display_mode != 0) {
         draw_visualizer(ART_X + 3, ART_Y + 3, ART_SZ - 6);
@@ -1499,29 +1499,10 @@ static void draw_browser(void)
     u32 cHeart   = C(mix_rgb(S.text, S.bg, 70));
     char buf[32];
 
-    /* ---- header: home | search | liked songs ---- */
-    neon_disc(20, 18, 14, 0.20f, cAcc, cGlow, cFill);
-    icon_home(20, 18, cAcc, cFill);
-
-    neon_box(38, 5, 170, 26, 13, 0.20f, cAcc, cGlow, cFill);
-    icon_search(54, 18, cDim, cFill);
-    if (L_is_search) {
-        row_text(search_q, 68, 5, 26, 0.42f, cText, C2D_AlignLeft, 118);
-        C2D_DrawLine(192, 13, cDim, 202, 23, cDim, 1.8f, 0.45f);
-        C2D_DrawLine(202, 13, cDim, 192, 23, cDim, 1.8f, 0.45f);
-    } else {
-        row_text("Search Music...", 68, 5, 26, 0.42f, cDim, C2D_AlignLeft, 130);
-    }
-
-    neon_box(212, 5, 100, 26, 13, 0.20f, L_is_favorites ? cAcc : cGrey, L_is_favorites ? cGlow : cGreyGl,
-             L_is_favorites ? cRowSel : cFill);
-    icon_heart(228, 18, 5.2f, cAcc);
-    row_text("Liked Songs", 240, 5, 26, 0.36f, cText, C2D_AlignLeft, 68);
-
-    /* ---- tabs: All Songs | Liked Songs | Playlists (Playlists opens Up Next) ---- */
-    static const char *TABS[3] = { "All Songs", "Liked Songs", "Playlists" };
+    /* ---- tabs: All Songs | Liked Songs | Queue (Queue opens Up Next) ---- */
+    static const char *TABS[3] = { "All Songs", "Liked Songs", "Queue" };
     for (int t = 0; t < 3; t++) {
-        const float x = 8.0f + t * 103.0f, ty = 36, tw = 98, th = 24;
+        const float x = 8.0f + t * 103.0f, ty = 6, tw = 98, th = 24;
         bool on = (t == 0 && !L_is_favorites) || (t == 1 && L_is_favorites);
         u32 ic = on ? cBg : cDim;
         if (on) {
@@ -1536,9 +1517,20 @@ static void draw_browser(void)
         row_text(TABS[t], x + 58, ty, th, 0.38f, on ? cBg : cDim, C2D_AlignCenter, 66);
     }
     if (manual_queue_count > 0) {                           /* badge: songs waiting in Up Next */
-        C2D_DrawCircleSolid(8 + 2 * 103 + 92, 38, 0.46f, 6.5f, cAcc);
+        C2D_DrawCircleSolid(8 + 2 * 103 + 92, 8, 0.46f, 6.5f, cAcc);
         snprintf(buf, sizeof buf, "%d", manual_queue_count);
-        row_text(buf, 8 + 2 * 103 + 92, 31.5f, 13, 0.30f, cBg, C2D_AlignCenter, 0);
+        row_text(buf, 8 + 2 * 103 + 92, 1.5f, 13, 0.30f, cBg, C2D_AlignCenter, 0);
+    }
+
+    /* ---- search bar, full width under the tabs ---- */
+    neon_box(8, 35, 304, 26, 13, 0.20f, cAcc, cGlow, cFill);
+    icon_search(26, 48, cDim, cFill);
+    if (L_is_search) {
+        row_text(search_q, 40, 35, 26, 0.42f, cText, C2D_AlignLeft, 230);
+        C2D_DrawLine(288, 43, cDim, 298, 53, cDim, 1.8f, 0.45f);
+        C2D_DrawLine(298, 43, cDim, 288, 53, cDim, 1.8f, 0.45f);
+    } else {
+        row_text("Search Music...", 40, 35, 26, 0.42f, cDim, C2D_AlignLeft, 230);
     }
 
     /* ---- song list ---- */
@@ -2023,7 +2015,7 @@ static void draw_wizard_bottom(void)
             "Drag the list up / down to scroll",
             "Drag the seek bar to jump in a song",
             "Tap the search bar to find a song",
-            "Tap Playlists to open Up Next",
+            "Tap Queue to open Up Next",
             "Settings: press SELECT; replay guide there"
         };
         for (int i = 0; i < 6; i++) {
@@ -2143,24 +2135,15 @@ static void handle_ctrl_tap(int px, int py)      /* bottom deck: seek line, tran
 
 static void open_up_next(void) { queue_open = true; queue_sel = 0; queue_scroll = 0; }
 
-static void handle_header_tap(int px, int py)    /* home / search / liked songs row and the three tabs */
+static void handle_header_tap(int px, int py)    /* tabs (All Songs / Liked Songs / Queue) and the search bar under them */
 {
-    if (py >= 34) {                                                             /* tabs: All Songs | Liked Songs | Playlists */
+    if (py < 33) {
         if (px < 108)      { if (L_is_favorites || L_is_search) set_dir(S.last_dir, NULL); }
         else if (px < 211) { if (!L_is_favorites) show_favorites(); }
         else               open_up_next();
         return;
     }
-    if (px < 36) {                                                              /* home */
-        if (L_is_favorites || L_is_search) set_dir(S.last_dir, NULL);
-        else if (strcmp(L.dir, MUSIC_ROOT) != 0) set_dir(MUSIC_ROOT, NULL);
-        return;
-    }
-    if (px >= 212) {                                                            /* Liked Songs button: toggle the view */
-        if (L_is_favorites) set_dir(S.last_dir, NULL); else show_favorites();
-        return;
-    }
-    if (L_is_search && px >= 186) exit_search();
+    if (L_is_search && px >= 276) exit_search();
     else open_search();
 }
 

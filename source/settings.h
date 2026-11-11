@@ -26,10 +26,11 @@ typedef struct {
     bool shuffle;
     int  sleep_minutes;              /* sleep timer selection: 5, 10, 15, 30, 45 or 60 */
     int  repeat;                     /* 0 = off, 1 = all, 2 = one         */
+    int  ui_ver;                     /* settings-file UI version (2 = Noise blue default theme) */
     char last_dir[512];              /* last browsed folder               */
 } Settings;
 
-#define PRESET_COUNT 5
+#define PRESET_COUNT 6
 extern const char *PRESET_NAMES[PRESET_COUNT];
 
 #define GLOW_COUNT 3

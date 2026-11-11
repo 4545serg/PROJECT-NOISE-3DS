@@ -4,8 +4,8 @@ Default theme is **Neon** (black, neon green `#24FF68`); the other themes recolo
 
 ## Bottom screen (`source/main.c`)
 - Thin neon outline around the screen; faint wallpaper accents behind it (Settings > Appearance).
-- Header: home button + full-width search pill (tap to search, x to clear).
-- Two tabs: **All Songs** and **Liked** (with count). Playlists were removed.
+- Top row: **All Songs / Liked Songs / Queue** tabs (Queue opens Up Next). Full-width search pill under them
+  (tap to search, x to clear).
 - Song list: four 25 px rows with a coloured tile, title/artist, a drawn heart (tap to like) and a neon
   selection outline. Animated bars mark the playing song.
 - Now-playing deck: seek bar with elapsed/total time, title/artist, shuffle, previous, play/pause,

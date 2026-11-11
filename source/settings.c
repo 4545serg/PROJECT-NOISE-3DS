@@ -9,6 +9,7 @@
 typedef struct { const char *name; u32 bg, text, accent, select; } Preset;
 
 static const Preset presets[PRESET_COUNT] = {
+    { "Noise",   0x040A14, 0xEAF2FF, 0x2F8CFF, 0x15366A },   /* the logo blue: default */
     { "Neon",    0x030806, 0xEEF4F2, 0x24FF68, 0x16502C },
     { "Emerald", 0x0A1410, 0xE8F6EE, 0x35D07F, 0x1B3A2C },
     { "Ocean",   0x0B1720, 0xE8F4F8, 0x39B8D6, 0x183A49 },
@@ -17,7 +18,7 @@ static const Preset presets[PRESET_COUNT] = {
 };
 
 const char *PRESET_NAMES[PRESET_COUNT] = {
-    "Neon", "Emerald", "Ocean", "Sunset", "Mono"
+    "Noise", "Neon", "Emerald", "Ocean", "Sunset", "Mono"
 };
 
 const char *GLOW_NAMES[GLOW_COUNT] = { "Off", "Soft", "Vivid" };
@@ -80,6 +81,7 @@ void settings_defaults(Settings *s)
 {
     memset(s, 0, sizeof(*s));
     settings_apply_preset(s, 0);
+    s->ui_ver = 2;
     s->glow = 2;
     s->seek_step = 5;
     s->fade_speed = 1;
@@ -101,6 +103,7 @@ void settings_load(Settings *s)
         f = fopen(backup_path, "r");
     }
     if (!f) return;
+    s->ui_ver = 1;                       /* files written before the Noise theme have no ui_ver */
 
     char line[600];
     while (fgets(line, sizeof(line), f)) {
@@ -148,6 +151,8 @@ void settings_load(Settings *s)
             s->wallpaper = atoi(value);
         else if (!strcmp(key, "seek_step"))
             s->seek_step = atoi(value);
+        else if (!strcmp(key, "ui_ver"))
+            s->ui_ver = atoi(value);
         else if (!strcmp(key, "setup_done"))
             s->setup_done = atoi(value) != 0;
         else if (!strcmp(key, "shuffle"))
@@ -181,6 +186,11 @@ void settings_load(Settings *s)
         if (s->eq_user[i] > 12) s->eq_user[i] = 12;
     }
     settings_eq_refresh(s);
+    if (s->ui_ver < 2) {                 /* migrate: old Neon (0) becomes the new blue default, others shift by one */
+        if (s->preset == 0) settings_apply_preset(s, 0);
+        else if (s->preset >= 1) s->preset += 1;
+        s->ui_ver = 2;
+    }
     if (s->preset < -1 || s->preset >= PRESET_COUNT) s->preset = -1;
 }
 
@@ -210,6 +220,7 @@ bool settings_save(const Settings *s)
     fprintf(f, "display_mode=%d\n", s->display_mode);
     fprintf(f, "wallpaper=%d\n", s->wallpaper);
     fprintf(f, "seek_step=%d\n", s->seek_step);
+    fprintf(f, "ui_ver=%d\n", s->ui_ver);
     fprintf(f, "setup_done=%d\n", s->setup_done ? 1 : 0);
     fprintf(f, "shuffle=%d\n", s->shuffle ? 1 : 0);
     fprintf(f, "sleep_minutes=%d\n", s->sleep_minutes);

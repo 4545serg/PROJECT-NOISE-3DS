@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Changed (UI, round 2)
+- Bottom screen: Home and the header "Liked Songs" button are gone; the tabs are now the top row and the
+  search bar sits full-width underneath them. "Playlists" is now **Queue** (opens Up Next).
+- New default theme **Noise**, using the logo blue (`#2F8CFF`); it also colours the boot screen. The old Neon
+  green is still available as a theme. Existing settings files are migrated (old Neon -> Noise).
+- Top screen: removed the ring around the cover. The ambient glow is now larger and stronger and takes its
+  colour from the album art (Settings > Appearance > Ambient glow: Soft / Vivid).
+
 ### Fixed (repo layout)
 - The neon UI, CIA workflow, fixed `app.rsf` and newer `get_deps.sh` were sitting loose in the repo root while the
   Makefile only builds `source/`, so builds kept producing the old UI. Everything now lives in `source/`,
