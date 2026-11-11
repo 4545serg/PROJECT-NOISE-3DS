@@ -1420,7 +1420,7 @@ static void draw_miniplayer(void)
 
 static void draw_browser(void)
 {
-    u32 cText = C(S.text), cAcc = C(S.accent);
+    u32 cText = C(S.text), cAcc = C(S.accent), cBg = C(S.bg);
     u32 cDim  = C(mix_rgb(S.text, S.bg, 120));
     u32 cCard = C(mix_rgb(S.bg, S.select, 150));
     u32 cRing = C(mix_rgb(S.bg, S.accent, 130));
