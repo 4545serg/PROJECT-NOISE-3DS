@@ -5,7 +5,6 @@
 #include <string.h>
 #include <strings.h>
 
-#include "libcfg.h"
 #include "minimp3.h"
 
 #define MAX_ART_BYTES (3u * 1024u * 1024u)

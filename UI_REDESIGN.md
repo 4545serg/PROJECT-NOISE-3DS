@@ -17,7 +17,7 @@ The UI has been restyled to closely follow the supplied PROJECT NOISE reference 
 - Three pill-shaped library tabs: All Songs, Liked Songs, Playlists.
 - Compact song rows with artwork tiles, title/artist text, duration/favorite indicators, and a bright selection outline.
 - Neon scrollbar.
-- Large bottom playback deck with Now Playing, shuffle/previous/play-next/repeat controls, and a volume-style control.
+- Large bottom playback deck closely matching the supplied reference: Now Playing panel, shuffle/previous/play/pause/next/repeat transport panel, and a compact speaker/volume panel.
 
 ## Interaction/layout updates
 - Touch hit areas were moved to follow the new visual layout.
