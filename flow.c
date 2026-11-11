@@ -101,6 +101,8 @@ static void loader(void *arg)
     (void)arg;
     while (!g_quit) {
         FlowWant job;
+        job.idx = -1;
+        job.path[0] = 0;
         int gen = 0;
         bool have = false;
 
