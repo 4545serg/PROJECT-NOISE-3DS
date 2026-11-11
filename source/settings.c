@@ -9,7 +9,7 @@
 typedef struct { const char *name; u32 bg, text, accent, select; } Preset;
 
 static const Preset presets[PRESET_COUNT] = {
-    { "Noise",   0x0B0D12, 0xF4F6FA, 0x3D9CFF, 0x1C2431 },
+    { "Neon",    0x030806, 0xEEF4F2, 0x24FF68, 0x16502C },
     { "Emerald", 0x0A1410, 0xE8F6EE, 0x35D07F, 0x1B3A2C },
     { "Ocean",   0x0B1720, 0xE8F4F8, 0x39B8D6, 0x183A49 },
     { "Sunset",  0x1F0E14, 0xFFEFE6, 0xFF7A45, 0x5A2431 },
@@ -17,7 +17,7 @@ static const Preset presets[PRESET_COUNT] = {
 };
 
 const char *PRESET_NAMES[PRESET_COUNT] = {
-    "Noise", "Emerald", "Ocean", "Sunset", "Mono"
+    "Neon", "Emerald", "Ocean", "Sunset", "Mono"
 };
 
 const char *GLOW_NAMES[GLOW_COUNT] = { "Off", "Soft", "Vivid" };

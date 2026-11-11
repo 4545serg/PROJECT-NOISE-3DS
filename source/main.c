@@ -26,12 +26,12 @@
 #include "noise.h"
 
 /* ---------------------------------------------------------------- layout */
-#define LIST_TOP   54
-#define ROW_H      24
+#define LIST_TOP   64
+#define ROW_H      25
 #define VIS_ROWS   4
-#define CTRL_TOP   153
-#define SL_X0      72          /* seek slider track, x range */
-#define SL_X1      248
+#define CTRL_TOP   168
+#define SL_X0      44          /* seek slider track, x range */
+#define SL_X1      274
 #define SB_X0      38          /* search bar starts after the Home button */
 #define SS_X0      96          /* settings slider track, x range */
 #define SS_X1      244
@@ -497,8 +497,8 @@ static void prev_track(void)
 static void follow_playing(void);
 
 static void flash_ctrl(float x) { ctrl_flash_x = x; ctrl_flash_t = CTRL_FLASH_FRAMES; }
-static void skip_next(void) { if (Q.n == 0 && manual_queue_count == 0) return; flash_ctrl(208); flow_show = false; next_track(true); follow_playing(); }
-static void skip_prev(void) { if (Q.n == 0) return; flash_ctrl(112); flow_show = false; prev_track(); follow_playing(); }
+static void skip_next(void) { if (Q.n == 0 && manual_queue_count == 0) return; flash_ctrl(232); flow_show = false; next_track(true); follow_playing(); }
+static void skip_prev(void) { if (Q.n == 0) return; flash_ctrl(168); flow_show = false; prev_track(); follow_playing(); }
 
 static void toggle_play(void)
 {
@@ -1316,86 +1316,142 @@ static void draw_top(void)
     draw_status_bar();
 }
 
+/* ====================================================================== bottom-screen UI
+ * Layering (citro2d depth: higher z = in front, equal z = draw order, text is always z 0.5):
+ *   0.05 gradient   0.08 wallpaper   0.10 frame   0.20 panels   0.22 panel insets
+ *   0.30 widgets    0.45 icons       0.46 toast
+ */
+static void icon_heart(float cx, float cy, float s, u32 c)
+{
+    C2D_DrawCircleSolid(cx - s * 0.5f, cy - s * 0.3f, 0.45f, s * 0.56f, c);
+    C2D_DrawCircleSolid(cx + s * 0.5f, cy - s * 0.3f, 0.45f, s * 0.56f, c);
+    C2D_DrawTriangle(cx - s * 1.02f, cy - s * 0.12f, c, cx + s * 1.02f, cy - s * 0.12f, c, cx, cy + s * 0.95f, c, 0.45f);
+}
+
+static void icon_home(float cx, float cy, u32 c, u32 door)
+{
+    C2D_DrawTriangle(cx - 8, cy - 0.5f, c, cx + 8, cy - 0.5f, c, cx, cy - 8, c, 0.45f);
+    C2D_DrawRectSolid(cx - 5, cy - 0.5f, 0.45f, 10, 7.5f, c);
+    C2D_DrawRectSolid(cx - 1.5f, cy + 2.5f, 0.46f, 3, 4.5f, door);
+}
+
+static void icon_queue(float cx, float cy, u32 c)
+{
+    C2D_DrawRectSolid(cx - 8, cy - 6, 0.45f, 16, 2, c);
+    C2D_DrawRectSolid(cx - 8, cy - 1, 0.45f, 16, 2, c);
+    C2D_DrawRectSolid(cx - 8, cy + 4, 0.45f, 8, 2, c);
+    C2D_DrawTriangle(cx + 2, cy + 2.5f, c, cx + 2, cy + 8.5f, c, cx + 8, cy + 5.5f, c, 0.45f);
+}
+
+static void icon_small_note(float x, float y, u32 c)      /* ~13x16 note, top-left at x,y */
+{
+    C2D_DrawCircleSolid(x + 4.5f, y + 12, 0.45f, 3.0f, c);
+    C2D_DrawRectSolid(x + 6.5f, y + 2, 0.45f, 2, 10, c);
+    C2D_DrawTriangle(x + 8.5f, y + 2, c, x + 12.5f, y + 6.5f, c, x + 8.5f, y + 8, c, 0.45f);
+}
+
+static void draw_frame(void)                  /* thin neon outline around the whole bottom screen */
+{
+    u32 c = C(mix_rgb(S.bg, S.accent, 130));
+    C2D_DrawRectSolid(2, 2, 0.10f, 316, 1.5f, c);
+    C2D_DrawRectSolid(2, 236.5f, 0.10f, 316, 1.5f, c);
+    C2D_DrawRectSolid(2, 2, 0.10f, 1.5f, 236, c);
+    C2D_DrawRectSolid(316.5f, 2, 0.10f, 1.5f, 236, c);
+}
+
+static void draw_toast(void)                  /* short status pill just above the transport deck */
+{
+    if (toast_t <= 0) return;
+    rrect(70, 142, 180, 20, 10, 0.46f, C(S.accent));
+    row_text(toast_msg, 160, 142, 20, 0.42f, C(S.bg), C2D_AlignCenter, 168);
+}
+
 static void draw_miniplayer(void)
 {
-    u32 cText = C(S.text), cAcc = C(S.accent), cSel = C(S.select), cBg = C(S.bg);
-    u32 cDim = C(mix_rgb(S.text, S.bg, 120));
+    u32 cText = C(S.text), cAcc = C(S.accent), cBg = C(S.bg);
+    u32 cDim  = C(mix_rgb(S.text, S.bg, 120));
+    u32 cCard = C(mix_rgb(S.bg, S.select, 150));
+    u32 cRing = C(mix_rgb(S.bg, S.accent, 130));
+    u32 cTrk  = C(mix_rgb(S.bg, S.select, 255));
     const float y = CTRL_TOP;
+    char buf[24];
 
-    rrect(3, y + 1, 314, 84, 14, 0.44f, cAcc);
-    rrect(6, y + 4, 308, 78, 11, 0.44f, cBg);
+    rrect(6, y, 308, 68, 13, 0.20f, cRing);
+    rrect(7.5f, y + 1.5f, 305, 65, 12, 0.22f, cCard);
 
-    rrect(7, y + 5, 92, 76, 12, 0.40f, cAcc);
-    rrect(10, y + 8, 86, 70, 9, 0.42f, cBg);
-    draw_visualizer(18, y + 27, 36);
-    draw_text("Now Playing:", 58, y + 16, 0.30f, cDim, C2D_AlignLeft, 55);
-    draw_text(track_loaded ? (cur.title[0] ? cur.title : "Song") : "Song", 58, y + 36, 0.42f, cAcc, C2D_AlignLeft, 36);
-
-    rrect(101, y + 5, 139, 76, 12, 0.40f, cAcc);
-    rrect(104, y + 8, 133, 70, 9, 0.42f, cBg);
-    const float cy = y + 43;
-    icon_shuffle(116, cy, 7, S.shuffle ? cAcc : cDim);
-    icon_prev(138, cy, 8, cAcc);
-    C2D_DrawCircleSolid(160, cy, 0.38f, 20, cAcc);
-    C2D_DrawCircleSolid(160, cy, 0.40f, 15, cBg);
-    if (audio_is_active() && !audio_is_paused()) icon_pause(160, cy, 8, cAcc); else icon_play(160, cy, 8, cAcc);
-    icon_next(182, cy, 8, cAcc);
-    icon_repeat(204, cy, 7, S.repeat ? cAcc : cDim);
-
-    rrect(242, y + 5, 71, 76, 12, 0.40f, cAcc);
-    rrect(245, y + 8, 65, 70, 9, 0.42f, cBg);
-    C2D_DrawRectSolid(251, cy - 5, 0.45f, 7, 10, cAcc);
-    C2D_DrawTriangle(258, cy - 9, cAcc, 258, cy + 9, cAcc, 267, cy, cAcc, 0.45f);
-    C2D_DrawLine(270, cy - 6, cAcc, 274, cy, cAcc, 2.0f, 0.45f);
-    C2D_DrawLine(274, cy, cAcc, 270, cy + 6, cAcc, 2.0f, 0.45f);
-    rrect(276, cy - 3, 28, 7, 3.5f, 0.42f, cSel);
-    rrect(276, cy - 3, 17, 7, 3.5f, 0.42f, cAcc);
-
+    /* seek bar with elapsed / total time */
     u32 pos = track_loaded ? audio_position_ms() : 0;
     u32 dur = track_loaded ? cur.duration_ms : 0;
-    float frac = progress_frac(pos, dur);
-    const float tx0 = SL_X0, tw = SL_X1 - SL_X0, ty = y + 12;
-    rrect(tx0, ty - 2, tw, 5, 2.5f, 0.34f, cSel);
-    float fw = tw * frac; if (fw < 4) fw = 4;
-    rrect(tx0, ty - 2, fw, 5, 2.5f, 0.36f, cAcc);
-    float kx = tx0 + tw * frac;
-    C2D_DrawCircleSolid(kx, ty, 0.41f, slider_drag ? 9.0f : 6.0f, cAcc);
-    C2D_DrawCircleSolid(kx, ty, 0.43f, slider_drag ? 5.5f : 4.0f, cBg);
+    float frac = slider_drag ? slider_frac : progress_frac(pos, dur);
+    const float tw = SL_X1 - SL_X0, ty = y + 12;
+    fmt_time(buf, sizeof buf, slider_drag ? (u32)(slider_frac * (float)dur) : pos);
+    row_text(buf, 14, y + 5, 14, 0.34f, cDim, C2D_AlignLeft, 34);
+    fmt_time(buf, sizeof buf, dur);
+    row_text(buf, 281, y + 5, 14, 0.34f, cDim, C2D_AlignLeft, 34);
+    rrect(SL_X0, ty - 2.5f, tw, 5, 2.5f, 0.30f, cTrk);
+    float fw = tw * frac; if (fw < 5) fw = 5;
+    rrect(SL_X0, ty - 2.5f, fw, 5, 2.5f, 0.32f, cAcc);
+    C2D_DrawCircleSolid(SL_X0 + tw * frac, ty, 0.36f, slider_drag ? 7.5f : 5.5f, cAcc);
+    C2D_DrawCircleSolid(SL_X0 + tw * frac, ty, 0.38f, slider_drag ? 3.0f : 2.0f, cBg);
+
+    /* what is playing */
+    const char *title = track_loaded ? (cur.title[0] ? cur.title : base_name(cur_path)) : "Nothing playing";
+    const char *sub   = track_loaded ? (cur.artist[0] ? cur.artist : (audio_is_paused() ? "Paused" : "Now playing"))
+                                     : "Pick a song to start";
+    draw_text(title, 14, y + 27, 0.46f, track_loaded ? cAcc : cText, C2D_AlignLeft, 112);
+    draw_text(sub,   14, y + 43, 0.32f, cDim, C2D_AlignLeft, 112);
+
+    /* transport (tap zones: see handle_ctrl_tap) */
+    const float cy = y + 44;
+    if (ctrl_flash_t > 0) C2D_DrawCircleSolid(ctrl_flash_x, cy, 0.26f, 17, C(mix_rgb(S.select, S.accent, 90)));
+    icon_shuffle(142, cy, 7, S.shuffle ? cAcc : cDim);
+    icon_prev(168, cy, 8, cText);
+    C2D_DrawCircleSolid(200, cy, 0.30f, 16, cAcc);
+    if (audio_is_active() && !audio_is_paused()) icon_pause(200, cy, 8, cBg); else icon_play(200, cy, 8, cBg);
+    icon_next(232, cy, 8, cText);
+    icon_repeat(260, cy, 7, S.repeat ? cAcc : cDim);
+    icon_queue(292, cy, queue_open ? cAcc : cText);
+    if (manual_queue_count > 0) {
+        C2D_DrawCircleSolid(302, cy - 9, 0.46f, 6.5f, cAcc);
+        snprintf(buf, sizeof buf, "%d", manual_queue_count);
+        row_text(buf, 302, cy - 15.5f, 13, 0.30f, cBg, C2D_AlignCenter, 0);
+    }
 }
 
 static void draw_browser(void)
 {
-    u32 cText = C(S.text), cAcc = C(S.accent), cSel = C(S.select), cBg = C(S.bg);
-    u32 cDim = C(mix_rgb(S.text, S.bg, 120));
+    u32 cText = C(S.text), cAcc = C(S.accent);
+    u32 cDim  = C(mix_rgb(S.text, S.bg, 120));
+    u32 cCard = C(mix_rgb(S.bg, S.select, 150));
+    u32 cRing = C(mix_rgb(S.bg, S.accent, 130));
+    u32 cRow  = C(mix_rgb(S.bg, S.select, 80));
+    u32 cRowSel = C(mix_rgb(S.bg, S.accent, 45));
 
-    C2D_DrawRectSolid(0, 0, 0.05f, BOT_W, SCR_H, cBg);
-    rrect(2, 2, 316, 236, 14, 0.42f, cAcc);
-    rrect(5, 5, 310, 230, 11, 0.42f, cBg);
+    /* header: home button + search pill */
+    C2D_DrawCircleSolid(21, 21, 0.20f, 13, cRing);
+    C2D_DrawCircleSolid(21, 21, 0.22f, 11.8f, cCard);
+    icon_home(21, 21, cAcc, cCard);
+    rrect(40, 8, 272, 26, 13, 0.20f, cRing);
+    rrect(41.2f, 9.2f, 269.6f, 23.6f, 11.8f, 0.22f, cCard);
+    icon_search(55, 21, cDim, cCard);
+    if (L_is_search) {
+        row_text(search_q, 69, 8, 26, 0.42f, cText, C2D_AlignLeft, 205);
+        C2D_DrawLine(293, 16, cDim, 303, 26, cDim, 1.8f, 0.45f);
+        C2D_DrawLine(303, 16, cDim, 293, 26, cDim, 1.8f, 0.45f);
+    } else {
+        row_text("Search music", 69, 8, 26, 0.42f, cDim, C2D_AlignLeft, 205);
+    }
 
-    rrect(6, 5, 30, 20, 10, 0.42f, cAcc);
-    rrect(8, 7, 26, 16, 8, 0.42f, cBg);
-    C2D_DrawTriangle(13, 15, cAcc, 18, 8, cAcc, 23, 15, cAcc, 0.45f);
-    C2D_DrawRectSolid(15, 14, 0.45f, 7, 7, cAcc);
+    /* tabs: All Songs | Liked */
+    rrect(8, 38, 304, 22, 11, 0.20f, cCard);
+    char liked[24];
+    snprintf(liked, sizeof liked, "Liked  %d", favorite_count);
+    bool fav_tab = L_is_favorites;
+    rrect(fav_tab ? 162 : 10, 40, 148, 18, 9, 0.24f, cAcc);
+    row_text("All Songs", 84,  40, 18, 0.40f, fav_tab ? cDim : cBg, C2D_AlignCenter, 140);
+    row_text(liked,       236, 40, 18, 0.40f, fav_tab ? cBg : cDim, C2D_AlignCenter, 140);
 
-    const float bx = 38, by = 5, bw = 188, bh = 20;
-    rrect(bx, by, bw, bh, 10, 0.42f, cAcc);
-    rrect(bx + 2, by + 2, bw - 4, bh - 4, 8, 0.42f, cBg);
-    icon_search(bx + 12, by + 10, cDim, cBg);
-    if (L_is_search) row_text(search_q, bx + 24, by, bh, 0.40f, cText, C2D_AlignLeft, bw - 38);
-    else row_text("Search Music...", bx + 24, by, bh, 0.40f, cDim, C2D_AlignLeft, bw - 38);
-
-    rrect(229, 5, 84, 20, 10, 0.40f, cSel);
-    rrect(231, 7, 80, 16, 8, 0.42f, cBg);
-    draw_text("♥", 241, 8, 0.42f, cAcc, C2D_AlignCenter, 0);
-    draw_text("Liked Songs", 270, 8, 0.30f, cText, C2D_AlignCenter, 66);
-
-    rrect(7, 29, 100, 22, 8, 0.42f, cAcc);
-    rrect(109, 29, 100, 22, 8, 0.40f, cSel);
-    rrect(211, 29, 102, 22, 8, 0.40f, cSel);
-    row_text("♫  All Songs", 57, 31, 18, 0.36f, cBg, C2D_AlignCenter, 92);
-    row_text("♥  Liked Songs", 159, 31, 18, 0.34f, cText, C2D_AlignCenter, 94);
-    row_text("☷  Playlists", 262, 31, 18, 0.34f, cText, C2D_AlignCenter, 96);
-
+    /* song list */
     int loads_this_frame = 0;
     for (int i = 0; i < VIS_ROWS; i++) {
         int idx = scroll_top + i;
@@ -1404,51 +1460,58 @@ static void draw_browser(void)
         float y = LIST_TOP + i * ROW_H;
         bool cur_row = is_current_row(idx);
         bool playing = cur_row && audio_is_active() && !audio_is_paused();
-        bool selected = idx == sel;
+        bool selected = (idx == sel);
 
         if (selected) {
-            rrect(6, y, 306, ROW_H - 2, 8, 0.40f, cAcc);
-            rrect(9, y + 2, 300, ROW_H - 6, 6, 0.42f, cBg);
+            rrect(8, y, 298, 23, 7, 0.20f, cAcc);
+            rrect(9.2f, y + 1.2f, 295.6f, 20.6f, 6, 0.22f, cRowSel);
         } else {
-            rrect(6, y, 306, ROW_H - 2, 8, 0.28f, cSel);
-            rrect(9, y + 2, 300, ROW_H - 6, 6, 0.42f, cBg);
+            rrect(8, y, 298, 23, 7, 0.20f, cRow);
         }
 
-        const float tx = 11, ty = y + 3, ts = 23;
+        const float tx = 12, tyy = y + 3;
         Rgb tc = e->is_dir ? mix_rgb(S.select, S.text, 60) : tile_color(e->name);
-        rrect(tx, ty, ts, ts, 5, 0.32f, C(tc));
+        rrect(tx, tyy, 17, 17, 5, 0.30f, C(tc));
         if (e->is_dir) {
-            C2D_DrawRectSolid(tx + 5, ty + 7, 0.45f, 6, 3, cText);
-            C2D_DrawRectSolid(tx + 5, ty + 10, 0.45f, 14, 8, cText);
+            C2D_DrawRectSolid(tx + 3, tyy + 4, 0.45f, 5, 2.5f, cText);
+            C2D_DrawRectSolid(tx + 3, tyy + 6, 0.45f, 11, 7, cText);
         } else if (playing) {
             for (int k = 0; k < 3; k++) {
-                float h = 4.0f + 9.0f * (0.5f + 0.5f * sinf(eq_phase * 2.0f + k * 1.7f));
-                C2D_DrawRectSolid(tx + 5 + k * 5, ty + ts - 4 - h, 0.45f, 3.5f, h, cAcc);
+                float h = 3.0f + 8.0f * (0.5f + 0.5f * sinf(eq_phase * 2.0f + k * 1.7f));
+                C2D_DrawRectSolid(tx + 3.5f + k * 4, tyy + 14 - h, 0.45f, 3, h, cAcc);
             }
         } else {
-            icon_note(tx + 6, ty + 5, cText);
+            icon_small_note(tx + 2, tyy + 0.5f, cText);
         }
 
-        const float lx = 40;
+        const float lx = 36;
         if (e->is_dir) {
-            draw_text(!strcmp(e->name, "..") ? "Back" : e->name, lx, y + 5, 0.46f, selected ? cAcc : cText, C2D_AlignLeft, 190);
+            row_text(!strcmp(e->name, "..") ? "Back" : e->name, lx, y, 23, 0.46f, selected ? cAcc : cText, C2D_AlignLeft, 250);
         } else {
             if (!e->meta_loaded && loads_this_frame < 1 && flow_idle > 2) { ensure_meta(e); loads_this_frame++; }
             const char *name = (e->meta_loaded && e->title[0]) ? e->title : base_name(e->name);
-            draw_text(name, lx, y + 3, 0.45f, cur_row ? cAcc : cText, C2D_AlignLeft, 178);
-            if (e->meta_loaded && e->artist[0]) draw_text(e->artist, lx, y + 16, 0.30f, cDim, C2D_AlignLeft, 175);
+            u32 tcol = cur_row ? cAcc : cText;
+            if (e->meta_loaded && e->artist[0]) {
+                draw_text(name, lx, y + 0.5f, 0.42f, tcol, C2D_AlignLeft, 235);
+                draw_text(e->artist, lx, y + 12.5f, 0.28f, cDim, C2D_AlignLeft, 235);
+            } else {
+                row_text(name, lx, y, 23, 0.44f, tcol, C2D_AlignLeft, 235);
+            }
             char favpath[256]; entry_relative_path(e, favpath, sizeof favpath);
-            bool fav = is_favorite(favpath);
-            draw_text("♥", 292, y + 6, 0.44f, fav ? cAcc : cDim, C2D_AlignCenter, 0);
+            icon_heart(293, y + 11, 4.6f, is_favorite(favpath) ? cAcc : C(mix_rgb(S.bg, S.text, 70)));
         }
     }
 
+    if (L.n == 0) {
+        draw_text(L_is_favorites ? "No liked songs yet" : "No songs here", 160, 92, 0.55f, cText, C2D_AlignCenter, 290);
+        draw_text(L_is_favorites ? "Tap a heart on any song to add it" : "Copy music to SD:/Music/", 160, 116, 0.38f, cDim, C2D_AlignCenter, 290);
+    }
     if (L.n > VIS_ROWS) {
-        float track_h = VIS_ROWS * ROW_H;
-        float th = track_h * VIS_ROWS / L.n; if (th < 12) th = 12;
+        float track_h = VIS_ROWS * ROW_H - 2;
+        float th = track_h * VIS_ROWS / L.n; if (th < 10) th = 10;
         float ty2 = LIST_TOP + (track_h - th) * scroll_top / (L.n - VIS_ROWS);
-        rrect(311, LIST_TOP, 4, track_h, 2, 0.30f, cSel);
-        rrect(311, ty2, 4, th, 2, 0.40f, cAcc);
+        rrect(309, LIST_TOP, 3, track_h, 1.5f, 0.20f, cRow);
+        rrect(309, ty2, 3, th, 1.5f, 0.30f, cAcc);
     }
 
     draw_miniplayer();
@@ -1750,9 +1813,6 @@ static void draw_queue(void)
     u32 cDim = C(mix_rgb(S.text, S.bg, 120));
     char buf[96];
 
-    rrect(2, 2, 316, 236, 14, 0.10f, cAcc);
-    rrect(5, 5, 310, 230, 11, 0.10f, cBg);
-
     draw_text("Up Next", 14, 6, 0.7f, cText, C2D_AlignLeft, 150);
     snprintf(buf, sizeof buf, "%d queued", manual_queue_count);
     draw_text(buf, 14, 29, 0.32f, cDim, C2D_AlignLeft, 150);
@@ -1942,7 +2002,7 @@ static void skip_seconds(int secs)
     toast(msg);
 }
 
-static void handle_ctrl_tap(int px, int py)      /* bottom bar: seek, transport and Up Next */
+static void handle_ctrl_tap(int px, int py)      /* bottom deck: seek, transport and Up Next */
 {
     if (py < CTRL_TOP + 24) {
         if (cur.duration_ms && track_loaded && px >= SL_X0 - 14 && px <= SL_X1 + 14) {
@@ -1951,22 +2011,29 @@ static void handle_ctrl_tap(int px, int py)      /* bottom bar: seek, transport 
         }
         return;
     }
-    if (px < 128)      { flash_ctrl(116); S.shuffle = !S.shuffle; mark_dirty(); }
-    else if (px < 150) skip_prev();
-    else if (px < 172) { flash_ctrl(160); toggle_play(); }
-    else if (px < 194) skip_next();
-    else if (px < 218) { flash_ctrl(204); S.repeat = (S.repeat + 1) % 3; mark_dirty(); }
-    else               { flash_ctrl(228); queue_open = !queue_open; queue_sel = 0; queue_scroll = 0; }
+    if (px < 130)      return;                                                  /* title area */
+    if (px < 155)      { flash_ctrl(142); S.shuffle = !S.shuffle; mark_dirty(); }
+    else if (px < 184) skip_prev();
+    else if (px < 216) { flash_ctrl(200); toggle_play(); }
+    else if (px < 245) skip_next();
+    else if (px < 276) { flash_ctrl(260); S.repeat = (S.repeat + 1) % 3; mark_dirty(); }
+    else               { flash_ctrl(292); queue_open = !queue_open; queue_sel = 0; queue_scroll = 0; }
 }
 
-static void handle_header_tap(int px)    /* home / search / Favorites shortcuts */
+static void handle_header_tap(int px, int py)    /* home / search row and the All Songs | Liked tabs */
 {
-    if (px < 36) { if (L_is_favorites || L_is_search) set_dir(S.last_dir, NULL); return; }
-    if (px >= 229) { if (L_is_favorites) set_dir(S.last_dir, NULL); else show_favorites(); return; }
-    if (px >= SB_X0 && px < 227) {
-        if (L_is_search && px >= 198) exit_search();
-        else open_search();
+    if (py >= 38) {                                                             /* tabs */
+        if (px < 160) { if (L_is_favorites || L_is_search) set_dir(S.last_dir, NULL); }
+        else if (!L_is_favorites) show_favorites();
+        return;
     }
+    if (px < 36) {                                                              /* home */
+        if (L_is_favorites || L_is_search) set_dir(S.last_dir, NULL);
+        else if (strcmp(L.dir, MUSIC_ROOT) != 0) set_dir(MUSIC_ROOT, NULL);
+        return;
+    }
+    if (L_is_search && px >= 284) exit_search();
+    else open_search();
 }
 
 /* touch on a settings card (Settings tabs and setup steps share this) */
@@ -2250,7 +2317,7 @@ int main(void)
                 drag_accum = 0;
                 touch_in_list = (tp.py >= LIST_TOP && tp.py < LIST_TOP + VIS_ROWS * ROW_H);
                 if (tp.py >= CTRL_TOP) handle_ctrl_tap(tp.px, tp.py);
-                else if (tp.py < LIST_TOP) handle_header_tap(tp.px);
+                else if (tp.py < LIST_TOP) handle_header_tap(tp.px, tp.py);
             }
             if ((kh & KEY_TOUCH) && touch_in_list) {
                 if (!dragging && abs((int)tp.py - (int)tp_start.py) > 8) dragging = true;
@@ -2309,12 +2376,14 @@ int main(void)
         C2D_SceneBegin(bot);
         bg_gradient(BOT_W);
         draw_wallpaper_accents(BOT_W, SCR_H);
+        draw_frame();
         if (search_busy > 0) draw_search_busy();
         else if (confirm_exit) draw_exit_confirm();
         else if (wizard_open) draw_wizard_bottom();
         else if (settings_open) draw_settings();
         else if (queue_open) draw_queue();
         else draw_browser();
+        draw_toast();
 
         C3D_FrameEnd(0);
 

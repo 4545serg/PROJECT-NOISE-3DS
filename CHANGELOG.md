@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Changed (UI)
+- Rebuilt the bottom screen: cleaner header, **All Songs / Liked** tabs (Playlists removed), roomier song rows,
+  a new now-playing deck, and the Neon green theme as the default. Fixed bottom-screen layering so panels no
+  longer hide the rows drawn on top of them, and status toasts are drawn again.
+
 ### Added
 - **Up Next screen**: the mini-player queue button opens a dedicated queue view with song titles, folder
   context, immediate play and per-item removal.

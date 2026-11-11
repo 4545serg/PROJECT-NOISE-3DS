@@ -1,27 +1,17 @@
-# PROJECT NOISE — Neon UI redesign
+# PROJECT NOISE - Neon UI
 
-The UI has been restyled to closely follow the supplied PROJECT NOISE reference screens.
+Default theme is **Neon** (black, neon green `#24FF68`); the other themes recolour the same layout.
 
-## Top screen
-- Black OLED-style background with a bright neon-green rounded outer frame.
-- Compact pill-shaped PROJECT NOISE header with signal/activity bars.
-- Date/time pill on the right.
-- Large centered album-art panel with a bright green keyline and layered glow.
-- Large centered song title beneath the artwork.
-- Thick neon-green seek bar with a circular handle.
-- Existing artwork loading/fade behavior and cover-flow behavior are retained.
+## Bottom screen (`source/main.c`)
+- Thin neon outline around the screen; faint wallpaper accents behind it (Settings > Appearance).
+- Header: home button + full-width search pill (tap to search, x to clear).
+- Two tabs: **All Songs** and **Liked** (with count). Playlists were removed.
+- Song list: four 25 px rows with a coloured tile, title/artist, a drawn heart (tap to like) and a neon
+  selection outline. Animated bars mark the playing song.
+- Now-playing deck: seek bar with elapsed/total time, title/artist, shuffle, previous, play/pause,
+  next, repeat and Up Next (with a queued-songs badge).
+- Short status toasts appear just above the deck.
 
-## Bottom screen
-- Matching neon-green rounded frame on black.
-- Home button, search field, and Liked Songs shortcut across the top.
-- Three pill-shaped library tabs: All Songs, Liked Songs, Playlists.
-- Compact song rows with artwork tiles, title/artist text, duration/favorite indicators, and a bright selection outline.
-- Neon scrollbar.
-- Large bottom playback deck closely matching the supplied reference: Now Playing panel, shuffle/previous/play/pause/next/repeat transport panel, and a compact speaker/volume panel.
-
-## Interaction/layout updates
-- Touch hit areas were moved to follow the new visual layout.
-- List rows were compressed to leave room for the new playback deck.
-- Existing physical-button behavior, favorites, search, queue, playback, and settings logic remain in place.
-
-The redesign is implemented in `source/main.c`, the only copy of the sources (the Makefile compiles `source/*.c`).
+## Layering
+citro2d depth: higher z is in front, equal z follows draw order, text is always z 0.5.
+0.05 gradient, 0.08 wallpaper, 0.10 frame, 0.20 panels, 0.22 panel insets, 0.30 widgets, 0.45 icons, 0.46 toast.
