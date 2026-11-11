@@ -123,7 +123,7 @@ EQ and the last folder - and is restored on the next launch. The last song and i
 resumes.
 
 **Lyrics** - tap **LYRICS** (next to the search bar) while a song is loaded. Lyrics are found in this order:
-`<song>.lrc` next to the file, the SD cache `SD:/3ds/PROJECT_NOISE/lyrics/`, then online: LRCLIB, an optional
+`<song>.lrc` next to the file, the SD cache `SD:/3ds/PROJECT_NOISE/lyrics/`, then online: LRCLIB, LRCMux (LRCLIB-compatible multi-provider fallback), an optional
 external service, and lyrics.ovh. Artist / title come from the file's tags (ID3, Vorbis comments, WAV INFO), or
 from an `Artist - Title` file name. Remixes, covers, live and karaoke versions are rejected unless the song itself is
 one, and the length must match. Synchronized (LRC) lyrics highlight the current line and scroll with the song;
@@ -132,7 +132,7 @@ Settings > Lyrics: *Automatic search* (look online when the lyrics screen opens;
 (keep results in the SD cache; off = shown only), *Offline only* (cache and `.lrc` files only), *Prefer synced*,
 *Clear lyrics cache*. Songs nobody has are remembered for 7 days so they are not searched again.
 
-PROJECT NOISE uses the devkitPro 3DS curl + mbedTLS stack for online lyrics, with the native http:C path retained as a fallback. Building now requires the `3ds-curl` and `3ds-mbedtls` devkitPro portlibs. The curl path first uses the Luma/Universal-Updater CA bundle at `SD:/config/ssl/cacert.pem`; if that bundle cannot validate the public lyrics server, the read-only request retries without peer verification.
+PROJECT NOISE uses the devkitPro 3DS curl + mbedTLS stack for online lyrics, with the native http:C path retained as a fallback. The app initializes the 3DS SOC socket service before libcurl, matching working 3DS HTTPS applications. Building now requires the `3ds-curl` and `3ds-mbedtls` devkitPro portlibs. The curl path first uses the Luma/Universal-Updater CA bundle at `SD:/config/ssl/cacert.pem`; if that bundle cannot validate the public lyrics server, the read-only request retries without peer verification.
 
 The native http:C fallback may still fail on modern HTTPS servers, but the primary curl/mbedTLS path is designed specifically to avoid that limitation. If both network paths fail, the lyrics screen says it
 could not reach the servers; an optional service can still be configured by creating

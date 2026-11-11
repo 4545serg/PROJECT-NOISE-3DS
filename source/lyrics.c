@@ -1,6 +1,7 @@
 #include "lyrics.h"
 
 #include <3ds.h>
+#include <malloc.h>
 #include <curl/curl.h>
 #include <ctype.h>
 #include <dirent.h>
@@ -21,8 +22,8 @@
 #define LY_MAX_FILE   (96 * 1024)
 #define LY_NF_DAYS    7
 #define HTTP_TIMEOUT_NS (7000000000ULL)
-#define HTTP_TOTAL_MS   15000
-#define USER_AGENT    "PROJECT-NOISE-3DS/1.1 (https://github.com/)"
+#define HTTP_TOTAL_MS   18000
+#define USER_AGENT    "PROJECT-NOISE-3DS/1.2 (https://github.com/)"
 
 /* ------------------------------------------------------------------ data */
 typedef struct {
@@ -59,7 +60,10 @@ static bool          g_mb_full;
 static int           g_mb_gen;
 static LyState       g_mb_state;
 static LyData        g_mb_data;
-static bool          g_ac_ok, g_http_ok, g_curl_ok, g_inited;
+static bool          g_ac_ok, g_http_ok, g_curl_ok, g_soc_ok, g_inited;
+static u32           *g_soc_buf;
+#define SOC_ALIGN      0x1000
+#define SOC_BUFSIZE    0x100000
 
 /* optional settings from lyrics.cfg (never compiled in) */
 static char g_proxy[300], g_token[200];
@@ -731,12 +735,14 @@ static int curl_get(const char *url, const char *token, int gen, char **out, siz
     curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(c, CURLOPT_MAXREDIRS, 4L);
     curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT_MS, 6000L);
-    curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, 12000L);
+    curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, HTTP_TOTAL_MS);
     curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, curl_write_cb);
     curl_easy_setopt(c, CURLOPT_WRITEDATA, &b);
     curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(c, CURLOPT_FAILONERROR, 0L);
     curl_easy_setopt(c, CURLOPT_HTTPGET, 1L);
+    curl_easy_setopt(c, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
+    curl_easy_setopt(c, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
 
     /* Prefer the CA bundle maintained by Luma/Universal-Updater. If it is
      * unavailable or the old bundle cannot validate the current chain, retry
@@ -1001,6 +1007,30 @@ static int try_proxy(const LyTrack *t, const Query *q, int gen, Found *f)
     return run_get(url, g_token, gen, q, true, "Service", f);
 }
 
+static int try_lrcmux(const LyTrack *t, const Query *q, int gen, Found *f)
+{
+    /* LRCMux exposes an LRCLIB-compatible API, but fans requests across
+     * multiple lyric backends. This is a useful independent fallback when
+     * lrclib.net itself is slow/rate-limited. The compatibility endpoint
+     * deliberately returns the same fields our LRCLIB parser already knows. */
+    char a[400], ti[400], url[1100];
+    url_enc(t->artist, a, sizeof a);
+    url_enc(t->title, ti, sizeof ti);
+
+    snprintf(url, sizeof url,
+             "https://api.lrcmux.dev/compat/lrclib/api/get?artist_name=%s&track_name=%s&duration=%d",
+             a, ti, q->dur_s);
+    int r = run_get(url, NULL, gen, q, false, "LRCMux", f);
+    if (r == 1 || r == -2) return r;
+
+    /* Search compatibility endpoint is intentionally the second request;
+     * avoid hammering either service with four LRCLIB queries in a row. */
+    snprintf(url, sizeof url,
+             "https://api.lrcmux.dev/compat/lrclib/api/search?artist_name=%s&track_name=%s",
+             a, ti);
+    return run_get(url, NULL, gen, q, false, "LRCMux", f);
+}
+
 static int try_ovh(const LyTrack *t, const Query *q, int gen, Found *f)
 {
     if (!t->artist[0]) return 0;
@@ -1036,10 +1066,11 @@ static void job_run(const LyTrack *t, const LyOptions *o, bool force, int gen, L
     Found f;
     memset(&f, 0, sizeof f);
     int answered = 0, failed = 0, r;
-    int (*const providers[3])(const LyTrack *, const Query *, int, Found *) = { try_lrclib, try_proxy, try_ovh };
+    int (*const providers[4])(const LyTrack *, const Query *, int, Found *) = { try_lrclib, try_lrcmux, try_proxy, try_ovh };
     bool found = false;
-    for (int i = 0; i < 3 && !found; i++) {
-        if (i == 1 && !g_proxy[0]) continue;
+    for (int i = 0; i < 4 && !found; i++) {
+        if (i == 2 && !g_proxy[0]) continue;
+        if (i > 0) svcSleepThread(350 * 1000 * 1000LL);
         r = providers[i](t, &q, gen, &f);
         if (r == -2) { *st = LY_IDLE; return; }                 /* superseded: result is dropped anyway */
         if (r == 1) found = true; else if (r == 0) answered++; else failed++;
@@ -1125,7 +1156,20 @@ void lyrics_init(void)
     LightLock_Init(&g_lk);
     load_cfg();
     g_ac_ok = R_SUCCEEDED(acInit());
-    g_curl_ok = (curl_global_init(CURL_GLOBAL_DEFAULT) == CURLE_OK);
+
+    /* libcurl ultimately uses the 3DS BSD socket layer. A 3DS process must
+     * initialize soc:u with a page-aligned buffer before DNS/TCP sockets can
+     * work. This was missing from the earlier lyrics implementation and can
+     * produce exactly the generic "couldn't reach lyrics servers" screen even
+     * though the console has working Wi-Fi. */
+    g_soc_buf = (u32 *)memalign(SOC_ALIGN, SOC_BUFSIZE);
+    if (g_soc_buf) g_soc_ok = R_SUCCEEDED(socInit(g_soc_buf, SOC_BUFSIZE));
+    if (!g_soc_ok) {
+        free(g_soc_buf);
+        g_soc_buf = NULL;
+    }
+
+    g_curl_ok = g_soc_ok && (curl_global_init(CURL_GLOBAL_DEFAULT) == CURLE_OK);
     /* Keep http:C initialized as a real fallback even when curl is available. */
     g_http_ok = R_SUCCEEDED(httpcInit(0));
     g_quit = false;
@@ -1145,6 +1189,10 @@ void lyrics_exit(void)
     }
     if (g_http_ok) httpcExit();
     if (g_curl_ok) curl_global_cleanup();
+    if (g_soc_ok) socExit();
+    free(g_soc_buf);
+    g_soc_buf = NULL;
+    g_soc_ok = false;
     if (g_ac_ok) acExit();
     data_free(&g_cur);
     data_free(&g_mb_data);

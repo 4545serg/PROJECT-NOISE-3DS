@@ -1,6 +1,6 @@
 # PROJECT NOISE - Nintendo 3DS music player
 #
-#   make        -> project_noise.3dsx (+ .smdh)     needs devkitPro with 3ds-dev + 3ds-curl + 3ds-mbedtls
+#   make        -> project_noise.3dsx (+ .smdh)     needs devkitPro with 3ds-dev + 3ds-curl + 3ds-mbedtls + 3ds-zlib
 #   make cia    -> project_noise.cia                additionally needs makerom + bannertool on PATH
 #   make deps   -> fetch the MP3 / FLAC / image decoder headers (make does this on demand)
 #   make clean
