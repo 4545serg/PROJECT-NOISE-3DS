@@ -1,6 +1,7 @@
 #include "lyrics.h"
 
 #include <3ds.h>
+#include <curl/curl.h>
 #include <ctype.h>
 #include <dirent.h>
 #include <stdint.h>
@@ -21,7 +22,7 @@
 #define LY_NF_DAYS    7
 #define HTTP_TIMEOUT_NS (7000000000ULL)
 #define HTTP_TOTAL_MS   15000
-#define USER_AGENT    "PROJECT-NOISE-3DS/1.0 (Nintendo 3DS music player)"
+#define USER_AGENT    "PROJECT-NOISE-3DS/1.1 (https://github.com/)"
 
 /* ------------------------------------------------------------------ data */
 typedef struct {
@@ -58,7 +59,7 @@ static bool          g_mb_full;
 static int           g_mb_gen;
 static LyState       g_mb_state;
 static LyData        g_mb_data;
-static bool          g_ac_ok, g_http_ok, g_inited;
+static bool          g_ac_ok, g_http_ok, g_curl_ok, g_inited;
 
 /* optional settings from lyrics.cfg (never compiled in) */
 static char g_proxy[300], g_token[200];
@@ -163,7 +164,24 @@ void lyrics_identify(LyTrack *t, const char *path, const char *tag_title, const 
     char *dot = strrchr(base, '.');
     if (dot) *dot = 0;
 
-    if (t->title[0] && strcmp(t->title, base) != 0) return;     /* real tags: use them as they are */
+    /* A real title tag is authoritative, but an empty artist tag should still be
+     * recoverable from a useful filename such as "Artist - Title.mp3".  This
+     * materially improves online lookup when files have incomplete metadata. */
+    if (t->title[0] && strcmp(t->title, base) != 0) {
+        if (!t->artist[0]) {
+            char fn[256];
+            snprintf(fn, sizeof fn, "%s", base);
+            char *sep = strstr(fn, " - ");
+            if (sep) {
+                *sep = 0;
+                char *ft = sep + 3;
+                trim(fn); trim(ft);
+                if (fn[0] && ft[0] && !strcasecmp(ft, t->title))
+                    snprintf(t->artist, sizeof t->artist, "%s", fn);
+            }
+        }
+        return;
+    }
 
     /* file-name fallback: "01 - Artist - Title", "Artist - Title" or just "Title" */
     char *p = base;
@@ -193,6 +211,18 @@ static void cache_name(const LyTrack *t, const char *ext, char *out, size_t cap)
     norm(t->title, ti, sizeof ti);
     snprintf(k, sizeof k, "%s|%s", a, ti);
     snprintf(out, cap, LY_DIR "/%08x%08x.%s", (unsigned)fnv(k, 2166136261u), (unsigned)fnv(k, 0x9E3779B9u), ext);
+}
+
+static void sidecar_name(const LyTrack *t, const char *ext, char *out, size_t cap)
+{
+    snprintf(out, cap, "%s", t->path);
+    char *dot = strrchr(out, '.');
+    if (dot && strlen(dot) <= 5) {
+        snprintf(dot, cap - (size_t)(dot - out), ".%s", ext);
+    } else {
+        size_t n = strlen(out);
+        if (n + strlen(ext) + 2 < cap) snprintf(out + n, cap - n, ".%s", ext);
+    }
 }
 
 static void ensure_dirs(void)
@@ -387,9 +417,7 @@ static bool load_into(const char *path, const char *src, LyData *d)
 static bool cache_lookup(const LyTrack *t, const LyOptions *o, LyData *d)
 {
     char side[820], lrc[96], txt[96];
-    snprintf(side, sizeof side, "%s", t->path);
-    char *dot = strrchr(side, '.');
-    if (dot && strlen(dot) <= 5) strcpy(dot, ".lrc"); else strcat(side, ".lrc");
+    sidecar_name(t, "lrc", side, sizeof side);
     cache_name(t, "lrc", lrc, sizeof lrc);
     cache_name(t, "txt", txt, sizeof txt);
 
@@ -640,85 +668,264 @@ static bool pick_best(const char *body, size_t len, const Query *q, bool trust, 
 }
 
 /* ----------------------------------------------------------------- HTTP */
+/*
+ * The 3DS http:C service is limited by the console SSL stack.  Current
+ * public lyrics APIs are commonly served with TLS versions/certificates that
+ * http:C cannot negotiate reliably.  devkitPro ships a 3DS curl port backed
+ * by mbedTLS 2.28.x, which gives homebrew a modern TLS client.  Use it first;
+ * keep the native http:C implementation below as a compatibility fallback.
+ */
+typedef struct {
+    char *data;
+    size_t len;
+    size_t cap;
+} CurlBuffer;
+
+static size_t curl_write_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
+{
+    CurlBuffer *b = (CurlBuffer *)userdata;
+    size_t n = size * nmemb;
+    if (n > LY_MAX_BODY - b->len) return 0;
+    if (b->len + n + 1 > b->cap) {
+        size_t nc = b->cap ? b->cap : 16384;
+        while (nc < b->len + n + 1) {
+            if (nc >= LY_MAX_BODY) { nc = LY_MAX_BODY; break; }
+            nc *= 2;
+        }
+        char *nb = realloc(b->data, nc);
+        if (!nb) return 0;
+        b->data = nb;
+        b->cap = nc;
+    }
+    memcpy(b->data + b->len, ptr, n);
+    b->len += n;
+    b->data[b->len] = 0;
+    return n;
+}
+
+static int curl_get(const char *url, const char *token, int gen, char **out, size_t *outlen)
+{
+    if (!g_curl_ok) return -1;
+    *out = NULL;
+    *outlen = 0;
+
+    CURL *c = curl_easy_init();
+    if (!c) return -1;
+
+    CurlBuffer b = {0};
+    struct curl_slist *headers = NULL;
+    char auth[240];
+    CURLcode rc;
+    long code = 0;
+
+    headers = curl_slist_append(headers, "Accept: application/json");
+    headers = curl_slist_append(headers, "Cache-Control: no-cache");
+    if (token && token[0]) {
+        snprintf(auth, sizeof auth, "Authorization: Bearer %s", token);
+        headers = curl_slist_append(headers, auth);
+    }
+
+    curl_easy_setopt(c, CURLOPT_URL, url);
+    curl_easy_setopt(c, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(c, CURLOPT_USERAGENT, USER_AGENT);
+    curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(c, CURLOPT_MAXREDIRS, 4L);
+    curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT_MS, 6000L);
+    curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, 12000L);
+    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, curl_write_cb);
+    curl_easy_setopt(c, CURLOPT_WRITEDATA, &b);
+    curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(c, CURLOPT_FAILONERROR, 0L);
+    curl_easy_setopt(c, CURLOPT_HTTPGET, 1L);
+
+    /* Prefer the CA bundle maintained by Luma/Universal-Updater. If it is
+     * unavailable or the old bundle cannot validate the current chain, retry
+     * once without peer verification. This is a read-only lyrics request; no
+     * credentials are sent to the public providers. */
+    curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 2L);
+    curl_easy_setopt(c, CURLOPT_CAINFO, "sdmc:/config/ssl/cacert.pem");
+    if (g_insecure) {
+        curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 0L);
+        curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 0L);
+    }
+
+    rc = curl_easy_perform(c);
+    if (rc == CURLE_OK) curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code);
+
+    /* If CA verification is the only thing that failed, retry the same URL
+     * with verification disabled. This specifically handles older 3DS CA
+     * bundles while still using mbedTLS for modern TLS negotiation. */
+    if (rc != CURLE_OK && !g_insecure &&
+        (rc == CURLE_PEER_FAILED_VERIFICATION || rc == CURLE_SSL_CONNECT_ERROR)) {
+        free(b.data); b.data = NULL; b.len = b.cap = 0;
+        curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 0L);
+        curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 0L);
+        rc = curl_easy_perform(c);
+        if (rc == CURLE_OK) curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code);
+    }
+
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(c);
+
+    if (g_quit || g_gen != gen) { free(b.data); return -2; }
+    if (rc != CURLE_OK) { free(b.data); return -1; }
+    if (code < 100 || code > 599) { free(b.data); return -1; }
+    if (code != 200) { free(b.data); return (int)code; }
+    if (!b.data || !b.len) { free(b.data); return -1; }
+
+    *out = b.data;
+    *outlen = b.len;
+    return 200;
+}
+
 /* returns the HTTP status (>0), -1 on a transport / TLS / timeout failure, -2 when cancelled */
-static int http_get(const char *url, const char *token, int gen, char **out, size_t *outlen)
+static int native_http_get(const char *url, const char *token, int gen, char **out, size_t *outlen)
 {
     char cur[1200];
     snprintf(cur, sizeof cur, "%s", url);
     *out = NULL; *outlen = 0;
 
+    /* Fresh 3DS HTTPC contexts have a very small/default trust store. Modern
+     * public lyrics services can therefore fail TLS verification even though
+     * the console has working Wi-Fi. Try verified TLS first, then retry the
+     * same read-only request with verification disabled. This preserves normal
+     * TLS whenever the console can verify the server, while making online
+     * lyrics usable on consoles whose CA set cannot validate the provider. */
+    bool secure_attempted = false;
+    bool insecure_attempted = false;
+
     for (int hop = 0; hop < 4; hop++) {
         if (g_quit || g_gen != gen) return -2;
-        httpcContext ctx;
-        if (R_FAILED(httpcOpenContext(&ctx, HTTPC_METHOD_GET, cur, 1))) return -1;
-        if (g_insecure) httpcSetSSLOpt(&ctx, SSLCOPT_DisableVerify);
-        httpcAddRequestHeaderField(&ctx, "User-Agent", USER_AGENT);
-        httpcAddRequestHeaderField(&ctx, "Accept", "application/json");
-        if (token && token[0]) {
-            char auth[240];
-            snprintf(auth, sizeof auth, "Bearer %s", token);
-            httpcAddRequestHeaderField(&ctx, "Authorization", auth);
-        }
-        if (R_FAILED(httpcBeginRequest(&ctx))) { httpcCloseContext(&ctx); return -1; }
 
-        u32 code = 0;
-        if (R_FAILED(httpcGetResponseStatusCodeTimeout(&ctx, &code, HTTP_TIMEOUT_NS))) {
-            httpcCancelConnection(&ctx);
-            httpcCloseContext(&ctx);
-            return (g_quit || g_gen != gen) ? -2 : -1;
-        }
-        if (code >= 300 && code < 400) {
-            char loc[600] = "";
-            httpcGetResponseHeader(&ctx, "Location", loc, sizeof loc);
-            httpcCloseContext(&ctx);
-            if (!strncmp(loc, "http", 4)) snprintf(cur, sizeof cur, "%s", loc);
-            else if (loc[0] == '/') {                                         /* same host, new path */
-                const char *s = strstr(cur, "://");
-                const char *slash = s ? strchr(s + 3, '/') : NULL;
-                size_t hl = slash ? (size_t)(slash - cur) : strlen(cur);
-                if (hl + strlen(loc) + 1 >= sizeof cur) return -1;
-                snprintf(cur + hl, sizeof cur - hl, "%s", loc);
-            } else return -1;
-            continue;
-        }
-        if (code != 200) { httpcCloseContext(&ctx); return (int)code; }
+        for (int tls_try = 0; tls_try < 2; tls_try++) {
+            bool insecure = g_insecure || (tls_try == 1);
+            if (insecure && insecure_attempted) continue;
+            if (!insecure && secure_attempted) continue;
+            if (insecure) insecure_attempted = true;
+            else secure_attempted = true;
 
-        size_t cap = 16384, n = 0;
-        char *buf = malloc(cap + 1);
-        if (!buf) { httpcCloseContext(&ctx); return -1; }
-        u32 start = 0;
-        httpcGetDownloadSizeState(&ctx, &start, NULL);
-        const u64 deadline = osGetTime() + HTTP_TOTAL_MS;
-        int result = 200;
-        for (;;) {
-            if (g_quit || g_gen != gen) { result = -2; break; }
-            if (osGetTime() > deadline) { result = -1; break; }
-            if (n == cap) {
-                if (cap >= LY_MAX_BODY) break;                               /* big enough: keep what we have */
-                char *nb = realloc(buf, cap * 2 + 1);
-                if (!nb) { result = -1; break; }
-                buf = nb; cap *= 2;
+            httpcContext ctx;
+            if (R_FAILED(httpcOpenContext(&ctx, HTTPC_METHOD_GET, cur, 1))) {
+                if (!insecure) continue;
+                return -1;
             }
-            u32 chunk = (u32)(cap - n > 8192 ? 8192 : cap - n);
-            Result rc = httpcReceiveDataTimeout(&ctx, (u8 *)buf + n, chunk, HTTP_TIMEOUT_NS);
-            u32 got = 0;
-            httpcGetDownloadSizeState(&ctx, &got, NULL);
-            n = (size_t)(got - start);
-            if (n > cap) n = cap;
-            if (rc == 0) break;                                             /* finished */
-            if (rc != (Result)HTTPC_RESULTCODE_DOWNLOADPENDING) { result = -1; break; }
+            if (insecure) httpcSetSSLOpt(&ctx, SSLCOPT_DisableVerify);
+
+            httpcAddRequestHeaderField(&ctx, "User-Agent", USER_AGENT);
+            httpcAddRequestHeaderField(&ctx, "Accept", "application/json");
+            if (token && token[0]) {
+                char auth[240];
+                snprintf(auth, sizeof auth, "Bearer %s", token);
+                httpcAddRequestHeaderField(&ctx, "Authorization", auth);
+            }
+
+            if (R_FAILED(httpcBeginRequest(&ctx))) {
+                httpcCloseContext(&ctx);
+                if (!insecure) continue;
+                return -1;
+            }
+
+            u32 code = 0;
+            if (R_FAILED(httpcGetResponseStatusCodeTimeout(&ctx, &code, HTTP_TIMEOUT_NS))) {
+                httpcCancelConnection(&ctx);
+                httpcCloseContext(&ctx);
+                if (g_quit || g_gen != gen) return -2;
+                if (!insecure) continue;
+                return -1;
+            }
+
+            if (code >= 300 && code < 400) {
+                char loc[600] = "";
+                httpcGetResponseHeader(&ctx, "Location", loc, sizeof loc);
+                httpcCloseContext(&ctx);
+                if (!strncmp(loc, "http", 4)) {
+                    snprintf(cur, sizeof cur, "%s", loc);
+                } else if (loc[0] == '/') {
+                    const char *s = strstr(cur, "://");
+                    const char *slash = s ? strchr(s + 3, '/') : NULL;
+                    size_t hl = slash ? (size_t)(slash - cur) : strlen(cur);
+                    if (hl + strlen(loc) + 1 >= sizeof cur) return -1;
+                    snprintf(cur + hl, sizeof cur - hl, "%s", loc);
+                } else {
+                    return -1;
+                }
+                /* Retry the redirected URL with the same TLS mode first. */
+                if (insecure) {
+                    insecure_attempted = false;
+                } else {
+                    secure_attempted = false;
+                }
+                continue;
+            }
+
+            if (code != 200) {
+                httpcCloseContext(&ctx);
+                return (int)code;
+            }
+
+            size_t cap = 16384, n = 0;
+            char *buf = malloc(cap + 1);
+            if (!buf) {
+                httpcCloseContext(&ctx);
+                return -1;
+            }
+
+            u32 start = 0;
+            httpcGetDownloadSizeState(&ctx, &start, NULL);
+            const u64 deadline = osGetTime() + HTTP_TOTAL_MS;
+            int result = 200;
+            for (;;) {
+                if (g_quit || g_gen != gen) { result = -2; break; }
+                if (osGetTime() > deadline) { result = -1; break; }
+                if (n == cap) {
+                    if (cap >= LY_MAX_BODY) break;
+                    char *nb = realloc(buf, cap * 2 + 1);
+                    if (!nb) { result = -1; break; }
+                    buf = nb;
+                    cap *= 2;
+                }
+                u32 chunk = (u32)(cap - n > 8192 ? 8192 : cap - n);
+                Result rc = httpcReceiveDataTimeout(&ctx, (u8 *)buf + n, chunk, HTTP_TIMEOUT_NS);
+                u32 got = 0;
+                httpcGetDownloadSizeState(&ctx, &got, NULL);
+                n = (size_t)(got - start);
+                if (n > cap) n = cap;
+                if (rc == 0) break;
+                if (rc != (Result)HTTPC_RESULTCODE_DOWNLOADPENDING) {
+                    result = -1;
+                    break;
+                }
+            }
+
+            if (result != 200) httpcCancelConnection(&ctx);
+            httpcCloseContext(&ctx);
+            if (result != 200) {
+                free(buf);
+                if (!insecure && result == -1) continue;
+                return result;
+            }
+
+            buf[n] = 0;
+            *out = buf;
+            *outlen = n;
+            return 200;
         }
-        if (result != 200) httpcCancelConnection(&ctx);
-        httpcCloseContext(&ctx);
-        if (result != 200) { free(buf); return result; }
-        buf[n] = 0;
-        *out = buf; *outlen = n;
-        return 200;
     }
     return -1;
 }
 
 /* Each provider returns: 1 found, 0 answered "not here", -1 unreachable / failed, -2 cancelled */
+static int http_get(const char *url, const char *token, int gen, char **out, size_t *outlen)
+{
+    /* Modern TLS path first. Native http:C remains available for older/local
+     * endpoints and for environments where curl is not usable. */
+    int rc = curl_get(url, token, gen, out, outlen);
+    if (rc == 200 || rc == 404 || rc == 400 || rc == 429 || rc == 403 || rc == 500 || rc == 503 || rc == -2)
+        return rc;
+    return native_http_get(url, token, gen, out, outlen);
+}
+
 static int run_get(const char *url, const char *token, int gen, const Query *q, bool trust, const char *src, Found *f)
 {
     char *body; size_t len;
@@ -733,22 +940,54 @@ static int run_get(const char *url, const char *token, int gen, const Query *q, 
 
 static int try_lrclib(const LyTrack *t, const Query *q, int gen, Found *f)
 {
-    char a[400], ti[400], cl[400], url[1100];
+    char a[400], ti[400], cl[400], raw[400], url[1100];
     url_enc(t->artist, a, sizeof a);
     url_enc(t->title, ti, sizeof ti);
     url_enc(q->clean, cl, sizeof cl);
+    url_enc(q->title, raw, sizeof raw);
 
-    int r_get = 0;
+    int answered = 0, failed = 0;
+
+    /* Exact lookup is the strongest match: artist + title + duration. */
     if (t->artist[0] && t->duration_ms) {
         snprintf(url, sizeof url, "https://lrclib.net/api/get?artist_name=%s&track_name=%s&duration=%d", a, ti, q->dur_s);
-        r_get = run_get(url, NULL, gen, q, false, "LRCLIB", f);
-        if (r_get == 1 || r_get == -2) return r_get;
+        int r = run_get(url, NULL, gen, q, false, "LRCLIB", f);
+        if (r == 1 || r == -2) return r;
+        if (r == 0) answered++; else if (r < 0) failed++;
     }
+
+    /* Search with the cleaned human title. */
     if (t->artist[0]) snprintf(url, sizeof url, "https://lrclib.net/api/search?artist_name=%s&track_name=%s", a, cl);
     else snprintf(url, sizeof url, "https://lrclib.net/api/search?track_name=%s", cl);
     int r = run_get(url, NULL, gen, q, false, "LRCLIB", f);
-    if (r == -1 && r_get == 0 && t->artist[0] && t->duration_ms) return 0;   /* /get answered, only /search failed */
-    return r;
+    if (r == 1 || r == -2) return r;
+    if (r == 0) answered++; else if (r < 0) failed++;
+
+    /* Some tagged files contain punctuation/parentheses that the search endpoint
+     * handles differently. Try the normalized title as a final LRCLIB query. */
+    if (strcmp(raw, cl) != 0) {
+        if (t->artist[0]) snprintf(url, sizeof url, "https://lrclib.net/api/search?artist_name=%s&track_name=%s", a, raw);
+        else snprintf(url, sizeof url, "https://lrclib.net/api/search?track_name=%s", raw);
+        r = run_get(url, NULL, gen, q, false, "LRCLIB", f);
+        if (r == 1 || r == -2) return r;
+        if (r == 0) answered++; else if (r < 0) failed++;
+    }
+
+    /* LRCLIB's q search is intentionally broad and can recover tracks whose
+     * artist/title fields contain unusual punctuation, featuring text, or
+     * metadata that does not match the structured search exactly.  We still
+     * run the normal candidate scorer before accepting anything. */
+    char qterm[700];
+    snprintf(qterm, sizeof qterm, "%s %s", t->artist, q->clean);
+    char qenc[800];
+    url_enc(qterm, qenc, sizeof qenc);
+    snprintf(url, sizeof url, "https://lrclib.net/api/search?q=%s", qenc);
+    r = run_get(url, NULL, gen, q, false, "LRCLIB", f);
+    if (r == 1 || r == -2) return r;
+    if (r == 0) answered++; else if (r < 0) failed++;
+
+    /* A failed search must not prevent the later providers from being tried. */
+    return answered ? 0 : (failed ? -1 : 0);
 }
 
 static int try_proxy(const LyTrack *t, const Query *q, int gen, Found *f)
@@ -785,7 +1024,7 @@ static void job_run(const LyTrack *t, const LyOptions *o, bool force, int gen, L
     if (o->offline_only) { *st = LY_OFFLINE; return; }
     if (!o->auto_search && !force) { *st = LY_IDLE; return; }
     if (!force && nf_fresh(t)) { *st = LY_NOTFOUND; return; }
-    if (!g_http_ok) { *st = LY_ERROR; return; }
+    if (!g_curl_ok && !g_http_ok) { *st = LY_ERROR; return; }
 
     u32 wifi = 1;
     if (g_ac_ok && R_SUCCEEDED(ACU_GetWifiStatus(&wifi)) && wifi == 0) { *st = LY_NONET; return; }
@@ -812,6 +1051,16 @@ static void job_run(const LyTrack *t, const LyOptions *o, bool force, int gen, L
                 char p[96];
                 cache_name(t, d->synced ? "lrc" : "txt", p, sizeof p);
                 write_file(p, f.raw);
+
+                /* LRCGET's useful convention is to place a same-name .lrc
+                 * beside the audio file.  PROJECT NOISE keeps its private
+                 * hashed cache too, but also writes the portable sidecar so
+                 * another lyrics-aware player can reuse the download. */
+                if (d->synced) {
+                    char side[820];
+                    sidecar_name(t, "lrc", side, sizeof side);
+                    write_file(side, f.raw);
+                }
             }
             free(f.raw);
             *st = LY_READY;
@@ -876,6 +1125,8 @@ void lyrics_init(void)
     LightLock_Init(&g_lk);
     load_cfg();
     g_ac_ok = R_SUCCEEDED(acInit());
+    g_curl_ok = (curl_global_init(CURL_GLOBAL_DEFAULT) == CURLE_OK);
+    /* Keep http:C initialized as a real fallback even when curl is available. */
     g_http_ok = R_SUCCEEDED(httpcInit(0));
     g_quit = false;
     g_thread = threadCreate(worker, NULL, 64 * 1024, 0x30, 1, false);
@@ -893,6 +1144,7 @@ void lyrics_exit(void)
         g_thread = NULL;
     }
     if (g_http_ok) httpcExit();
+    if (g_curl_ok) curl_global_cleanup();
     if (g_ac_ok) acExit();
     data_free(&g_cur);
     data_free(&g_mb_data);

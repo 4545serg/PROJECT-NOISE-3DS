@@ -1,6 +1,6 @@
 # PROJECT NOISE - Nintendo 3DS music player
 #
-#   make        -> project_noise.3dsx (+ .smdh)     needs devkitPro with the 3ds-dev group
+#   make        -> project_noise.3dsx (+ .smdh)     needs devkitPro with 3ds-dev + 3ds-curl + 3ds-mbedtls
 #   make cia    -> project_noise.cia                additionally needs makerom + bannertool on PATH
 #   make deps   -> fetch the MP3 / FLAC / image decoder headers (make does this on demand)
 #   make clean
@@ -31,7 +31,7 @@ ARCH    := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
 CFLAGS  := -g -Wall -O2 -std=gnu11 -mword-relocations -ffunction-sections -fdata-sections \
            $(ARCH) -D__3DS__ -Isource -I$(CTRULIB)/include -I$(PORTLIBS)/include
 LDFLAGS := -specs=3dsx.specs -g $(ARCH) -L$(CTRULIB)/lib -L$(PORTLIBS)/lib
-LIBS    := -lcitro2d -lcitro3d -lctru -lm
+LIBS    := -lcurl -lmbedtls -lmbedx509 -lmbedcrypto -lz -lcitro2d -lcitro3d -lctru -lm
 
 SRCS := $(wildcard source/*.c)
 OBJS := $(patsubst source/%.c,$(BUILD)/%.o,$(SRCS))

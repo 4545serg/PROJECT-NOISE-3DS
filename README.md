@@ -132,8 +132,10 @@ Settings > Lyrics: *Automatic search* (look online when the lyrics screen opens;
 (keep results in the SD cache; off = shown only), *Offline only* (cache and `.lrc` files only), *Prefer synced*,
 *Clear lyrics cache*. Songs nobody has are remembered for 7 days so they are not searched again.
 
-The Old 3DS system TLS stack is outdated and may refuse some HTTPS sites. If that happens the lyrics screen says it
-could not reach the servers; point the app at a small service of your own by creating
+PROJECT NOISE uses the devkitPro 3DS curl + mbedTLS stack for online lyrics, with the native http:C path retained as a fallback. Building now requires the `3ds-curl` and `3ds-mbedtls` devkitPro portlibs. The curl path first uses the Luma/Universal-Updater CA bundle at `SD:/config/ssl/cacert.pem`; if that bundle cannot validate the public lyrics server, the read-only request retries without peer verification.
+
+The native http:C fallback may still fail on modern HTTPS servers, but the primary curl/mbedTLS path is designed specifically to avoid that limitation. If both network paths fail, the lyrics screen says it
+could not reach the servers; an optional service can still be configured by creating
 `SD:/3ds/PROJECT_NOISE/lyrics.cfg`:
 
 ```

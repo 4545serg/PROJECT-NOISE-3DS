@@ -1,3 +1,10 @@
+## Lyrics networking repair
+
+- Use devkitPro 3DS curl + mbedTLS for online lyrics before the legacy http:C path.
+- Follow redirects and modern HTTPS/TLS negotiation through libcurl.
+- Use `SD:/config/ssl/cacert.pem` when available and retry read-only lyrics requests without peer verification when the CA chain is unavailable.
+- Keep LRCLIB exact/search/q lookup, lyrics.ovh fallback, SD cache, sidecar `.lrc` loading, and background playback behavior.
+
 ## 2026-11-11 — Lyrics network reliability
 
 - Added a TLS fallback for the 3DS lyrics HTTP client: verified HTTPS is attempted first, then the same read-only request is retried with certificate verification disabled when the console cannot validate the provider certificate chain.
