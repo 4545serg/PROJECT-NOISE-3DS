@@ -53,7 +53,7 @@
 #define EQ_TRK_Y1  201         /* ... -12 dB at the bottom           */
 
 enum {                         /* settings rows, grouped in four pages */
-    ROW_OLED, ROW_BRIGHTNESS, ROW_GLOWCOL, ROW_GLOW, ROW_DYN,                 /* Appearance */
+    ROW_PRESET, ROW_OLED, ROW_GLOWCOL, ROW_GLOW, ROW_DYN, ROW_WALLPAPER,       /* Look    */
     ROW_EQMAN, ROW_EQPRE, ROW_B0, ROW_B1, ROW_B2, ROW_B3, ROW_B4,              /* Audio   */
     ROW_DISPLAY, ROW_FADE, ROW_INFO, ROW_RESUME, ROW_SEEK,                     /* Player  */
     ROW_LY_SEARCH, ROW_LY_DL, ROW_LY_OFFLINE, ROW_LY_SYNC, ROW_LY_FONT, ROW_LY_CLEAR, /* Lyrics */
@@ -65,18 +65,18 @@ enum {                         /* settings rows, grouped in four pages */
 /* "Cards" are lists of settings rows drawn as one inset panel. Cards 0 and 2 are the Look and General
  * tabs (the Sound tab has its own layout); CARD_SETUP is the single combined page of the first-run setup. */
 enum { CARD_LOOK, CARD_SOUND, CARD_PLAYER, CARD_GENERAL, CARD_SETUP, CARD_LYRICS, CARD_COUNT };
-static const int   ROWS_LOOK[]    = { ROW_OLED, ROW_BRIGHTNESS, ROW_GLOW, ROW_GLOWCOL, ROW_DYN };
+static const int   ROWS_LOOK[]    = { ROW_OLED, ROW_GLOWCOL, ROW_GLOW, ROW_DYN };
 static const int   ROWS_PLAYER[]  = { ROW_DISPLAY, ROW_FADE, ROW_INFO, ROW_RESUME, ROW_SEEK };
 static const int   ROWS_GENERAL[] = { ROW_CLOCK, ROW_BATT, ROW_BATTSTYLE, ROW_SAVER, ROW_SLEEP_ENABLE, ROW_SLEEP_TIMER, ROW_GUIDE, ROW_EXIT };
-static const int   ROWS_SETUP[]   = { ROW_OLED, ROW_BRIGHTNESS, ROW_GLOW, ROW_CLOCK, ROW_BATT };
+static const int   ROWS_SETUP[]   = { ROW_PRESET, ROW_GLOW, ROW_CLOCK, ROW_BATT };
 static const int   ROWS_LYRICS[]  = { ROW_LY_SEARCH, ROW_LY_DL, ROW_LY_OFFLINE, ROW_LY_SYNC, ROW_LY_FONT, ROW_LY_CLEAR };
 static const int  *CARD_ROWS[CARD_COUNT] = { ROWS_LOOK, NULL, ROWS_PLAYER, ROWS_GENERAL, ROWS_SETUP, ROWS_LYRICS };
-static const int   CARD_LEN[CARD_COUNT]  = { 5, 0, 5, 8, 5, 6 };
-static const float CARD_ROWH[CARD_COUNT] = { 30.0f, 0.0f, 28.0f, 19.5f, 22.0f, 25.0f };
+static const int   CARD_LEN[CARD_COUNT]  = { 4, 0, 5, 8, 4, 6 };
+static const float CARD_ROWH[CARD_COUNT] = { 36.0f, 0.0f, 28.0f, 19.5f, 25.0f, 25.0f };
 #define PAGES 5
 static const int   PAGE_CARD[PAGES]      = { CARD_LOOK, CARD_SOUND, CARD_PLAYER, CARD_LYRICS, CARD_GENERAL };
 static const int   TAB_FIRST[PAGES]      = { ROW_OLED, ROW_EQMAN, ROW_DISPLAY, ROW_LY_SEARCH, ROW_CLOCK };
-static const char *PAGE_NAMES[PAGES]     = { "Display", "Audio", "Player", "Lyrics", "General" };
+static const char *PAGE_NAMES[PAGES]     = { "Look", "Audio", "Player", "Lyrics", "General" };
 #define TAB_W   60             /* settings tab strip: PAGES segments of TAB_W px starting at x = 10 */
 
 #define TOP_W   400            /* screen sizes in pixels */
@@ -84,7 +84,7 @@ static const char *PAGE_NAMES[PAGES]     = { "Display", "Audio", "Player", "Lyri
 #define SCR_H   240
 
 /* ambient glow: how strongly the cover colour tints the top screen, and how far it reaches */
-static const float GLOW_STRENGTH[GLOW_COUNT] = { 0.0f, 0.22f, 0.36f };
+static const float GLOW_STRENGTH[GLOW_COUNT] = { 0.0f, 0.30f, 0.50f };
 #define GLOW_CORE   62.0f      /* half-size of the fully-lit core around the centre cover */
 #define GLOW_REACH  190.0f     /* distance from that core at which the glow has faded out */
 
@@ -328,11 +328,9 @@ static u32 top_bg_color(float x, float y)              /* also handed to the cov
 
 /* The glow is a grid of gouraud-shaded cells. Vertex colours only depend on the glow colour, its strength and
  * the theme, so they are cached and rebuilt only while the colour is actually easing toward a new cover. */
-/* Keep the ambient mesh deliberately coarse: the glow is intentionally soft,
- * and fewer quads leave more GPU time for scrolling, artwork and audio UI. */
-#define GLOW_COLS    (TOP_W / 40)
-#define GLOW_BANDS   5
-static const float GLOW_YS[GLOW_BANDS + 1] = { 0, 40, 80, 120, 170, SCR_H };
+#define GLOW_COLS    (TOP_W / 20)
+#define GLOW_BANDS   7
+static const float GLOW_YS[GLOW_BANDS + 1] = { 0, 22, 58, 94, 130, 166, 200, SCR_H };
 
 static void top_background(void)
 {
@@ -346,12 +344,12 @@ static void top_background(void)
         memcpy(key, now, sizeof key);
         for (int yi = 0; yi <= GLOW_BANDS; yi++)
             for (int xi = 0; xi <= GLOW_COLS; xi++)
-                mesh[yi * (GLOW_COLS + 1) + xi] = top_bg_color((float)xi * 40.0f, GLOW_YS[yi]);
+                mesh[yi * (GLOW_COLS + 1) + xi] = top_bg_color((float)xi * 20.0f, GLOW_YS[yi]);
     }
     for (int yi = 0; yi < GLOW_BANDS; yi++) {
         for (int xi = 0; xi < GLOW_COLS; xi++) {
             const u32 *a = &mesh[yi * (GLOW_COLS + 1) + xi], *b = a + (GLOW_COLS + 1);
-            C2D_DrawRectangle((float)xi * 40.0f, GLOW_YS[yi], 0.02f, 40.0f, GLOW_YS[yi + 1] - GLOW_YS[yi],
+            C2D_DrawRectangle((float)xi * 20.0f, GLOW_YS[yi], 0.02f, 20.0f, GLOW_YS[yi + 1] - GLOW_YS[yi],
                               a[0], a[1], b[0], b[1]);
         }
     }
@@ -387,98 +385,6 @@ static void draw_text_sh(const char *s, float x, float y, float sc, u32 color, u
     Rgb black = { 0, 0, 0 };
     draw_text(s, x + 1, y + 1, sc, C(mix_rgb(bg_at(y), black, 190)), align, maxw);   /* soft shadow */
     draw_text(s, x, y, sc, color, align, maxw);
-}
-
-/* Small, automatic marquee for the compact player deck.  The deck is intentionally
- * narrow, so shrinking long metadata would make it unreadable.  Instead we show a
- * short window, pause at both ends, then slide it back and forth.  This is driven
- * by the existing frame counter and does not allocate or touch the audio thread. */
-static int utf8_chars(const char *s)
-{
-    int n = 0;
-    for (size_t i = 0; s[i]; ) {
-        unsigned char c = (unsigned char)s[i++];
-        if ((c & 0x80) == 0) { }
-        else if ((c & 0xE0) == 0xC0 && s[i]) i += 1;
-        else if ((c & 0xF0) == 0xE0 && s[i] && s[i + 1]) i += 2;
-        else if ((c & 0xF8) == 0xF0 && s[i] && s[i + 1] && s[i + 2]) i += 3;
-        n++;
-    }
-    return n;
-}
-
-static size_t utf8_advance(const char *s, size_t p)
-{
-    if (!s[p]) return p;
-    unsigned char c = (unsigned char)s[p++];
-    if ((c & 0x80) == 0) return p;
-    if ((c & 0xE0) == 0xC0) return s[p] ? p + 1 : p;
-    if ((c & 0xF0) == 0xE0) return (s[p] && s[p + 1]) ? p + 2 : p;
-    if ((c & 0xF8) == 0xF0) return (s[p] && s[p + 1] && s[p + 2]) ? p + 3 : p;
-    return p;
-}
-
-static size_t utf8_offset(const char *s, int chars)
-{
-    size_t p = 0;
-    while (chars-- > 0 && s[p]) p = utf8_advance(s, p);
-    return p;
-}
-
-static void draw_marquee(const char *s, float x, float y, float sc, u32 color, float maxw, unsigned seed)
-{
-    if (!s || !s[0]) return;
-
-    char full[300];
-    snprintf(full, sizeof full, "%s", s);
-    C2D_Text mt;
-    C2D_TextParse(&mt, tbuf, full);
-    float fw = 0.0f, fh = 0.0f;
-    C2D_TextGetDimensions(&mt, sc, sc, &fw, &fh);
-    if (fw <= maxw) {
-        draw_text(full, x, y, sc, color, C2D_AlignLeft, maxw);
-        return;
-    }
-
-    const int total = utf8_chars(full);
-    int visible = (seed == 0) ? 11 : 15;
-    if (visible > total) visible = total;
-    const int shift = total - visible;
-
-    /* 1 second hold, slow 0.2 s/character travel, 1 second hold, reverse. */
-    const unsigned travel = (unsigned)(shift > 0 ? shift * 12 : 0);
-    const unsigned hold = 60;
-    const unsigned period = hold + travel + hold + travel;
-    unsigned phase = period ? ((frame_no + seed * 37u) % period) : 0;
-    int start = 0;
-    if (phase < hold) start = 0;
-    else if (phase < hold + travel) start = (int)((phase - hold) / 12u);
-    else if (phase < hold + travel + hold) start = shift;
-    else start = shift - (int)((phase - hold - travel - hold) / 12u);
-    if (start < 0) start = 0;
-    if (start > shift) start = shift;
-
-    char window[128];
-    for (;;) {
-        size_t a = utf8_offset(full, start);
-        size_t b = utf8_offset(full, start + visible);
-        size_t n = b - a;
-        if (n >= sizeof window - 8) n = sizeof window - 9;
-        size_t w = 0;
-        if (start > 0) { memcpy(window + w, "...", 3); w += 3; }
-        memcpy(window + w, full + a, n); w += n;
-        if (start + visible < total) { memcpy(window + w, "...", 3); w += 3; }
-        window[w] = 0;
-
-        C2D_Text wt;
-        C2D_TextParse(&wt, tbuf, window);
-        float ww = 0.0f, wh = 0.0f;
-        C2D_TextGetDimensions(&wt, sc, sc, &ww, &wh);
-        if (ww <= maxw || visible <= 4) break;
-        visible--;
-        /* Recompute the travel/position with the smaller window on the next frame. */
-    }
-    draw_text(window, x, y, sc, color, C2D_AlignLeft, maxw);
 }
 
 static void fmt_time(char *out, size_t cap, u32 ms)
@@ -916,15 +822,6 @@ static void ensure_meta(Entry *e)
 }
 
 
-static void screen_brightness_apply(void)
-{
-    u32 level = (u32)(S.brightness < 1 ? 1 : (S.brightness > 5 ? 5 : S.brightness));
-    if (R_SUCCEEDED(gspLcdInit())) {
-        GSPLCD_SetBrightness(GSPLCD_SCREEN_BOTH, level);
-        gspLcdExit();
-    }
-}
-
 /* --------------------------------------------------------------- settings */
 static bool is_slider_row(int r) { return r >= ROW_B0 && r <= ROW_B4; }
 static int  row_page(int r)      { return r < ROW_EQMAN ? 0 : (r < ROW_DISPLAY ? 1 : (r < ROW_LY_SEARCH ? 2 : (r < ROW_CLOCK ? 3 : 4))); }
@@ -936,7 +833,7 @@ static bool is_switch_row(int r)
            r == ROW_LY_SEARCH || r == ROW_LY_DL || r == ROW_LY_OFFLINE || r == ROW_LY_SYNC;
 }
 static bool is_band_row(int r)   { return r >= ROW_B0 && r <= ROW_B4; }
-static bool is_choice_row(int r) { return r == ROW_EQPRE || r == ROW_CLOCK || r == ROW_GLOW || r == ROW_FADE || r == ROW_DISPLAY || r == ROW_SEEK || r == ROW_SLEEP_TIMER || r == ROW_GLOWCOL || r == ROW_BATTSTYLE || r == ROW_LY_FONT || r == ROW_BRIGHTNESS; }
+static bool is_choice_row(int r) { return r == ROW_PRESET || r == ROW_EQPRE || r == ROW_CLOCK || r == ROW_GLOW || r == ROW_FADE || r == ROW_DISPLAY || r == ROW_WALLPAPER || r == ROW_SEEK || r == ROW_SLEEP_TIMER || r == ROW_GLOWCOL || r == ROW_BATTSTYLE || r == ROW_LY_FONT; }
 
 static int card_pos(int card, int row)            /* index of `row` inside a card, or -1 */
 {
@@ -1067,7 +964,13 @@ static void show_favorites(void)
 
 static void set_adjust(int dir)
 {
-    if (set_row == ROW_EQMAN) {
+    if (set_row == ROW_PRESET) {
+        int p = S.preset + dir;
+        if (S.preset < 0) p = (dir > 0) ? 0 : PRESET_COUNT - 1;
+        if (p < 0) p = PRESET_COUNT - 1;
+        if (p >= PRESET_COUNT) p = 0;
+        settings_apply_preset(&S, p);
+    } else if (set_row == ROW_EQMAN) {
         S.eq_manual = !S.eq_manual;
         if (S.eq_manual) {                    /* first time on: start from the curve you were hearing */
             bool flat = true;
@@ -1100,11 +1003,8 @@ static void set_adjust(int dir)
         S.fade_speed = (S.fade_speed + dir + FADE_COUNT) % FADE_COUNT;
     } else if (set_row == ROW_DISPLAY) {
         S.display_mode = (S.display_mode + dir + 4) % 4;
-    } else if (set_row == ROW_BRIGHTNESS) {
-        S.brightness += dir;
-        if (S.brightness < 1) S.brightness = 5;
-        if (S.brightness > 5) S.brightness = 1;
-        screen_brightness_apply();
+    } else if (set_row == ROW_WALLPAPER) {
+        S.wallpaper = (S.wallpaper + dir + 5) % 5;
     } else if (set_row == ROW_SLEEP_ENABLE) {
         if (sleep_timer_active) sleep_timer_cancel();
         else sleep_timer_start_or_reset();
@@ -1390,12 +1290,9 @@ static void rrect(float x, float y, float w, float h, float r, float z, u32 c)
 /* ---- neon building blocks shared by the top and bottom screens ----
  * Everything is "dark panel + bright rim + faint halo", like the reference mock-up. Colours come from the
  * theme (accent / bg / text), so the other presets simply recolour the same layout. */
-static u32 neon_glow(void)                                                   /* restrained halo behind a lit rim */
+static u32 neon_glow(void)                                                   /* halo behind a lit rim */
 {
-    /* The previous halo was bright enough to compete with artwork and cost
-     * a lot of overdraw.  Keep the neon identity, but make it a supporting
-     * effect rather than the main visual element. */
-    return C(mix_rgb(th_bg, th_glow, S.saver ? 28 : (S.oled ? 58 : 44)));
+    return C(mix_rgb(th_bg, th_glow, S.saver ? 50 : (S.oled ? 90 : 70)));
 }
 
 static void neon_box(float x, float y, float w, float h, float r, float z, u32 rim, u32 glow, u32 fill)
@@ -1412,7 +1309,7 @@ static void neon_disc(float cx, float cy, float r, float z, u32 rim, u32 glow, u
     C2D_DrawCircleSolid(cx, cy, z + 0.004f, r - 1.6f, fill);
 }
 
-/* outline around a whole screen. */
+/* outline around a whole screen. It also paints the inside, so draw wallpaper accents after it. */
 static void neon_frame(float w, float h, float z)
 {
     rrect(0, 0, w, h, 17, z, neon_glow());
@@ -1440,8 +1337,8 @@ static void ring_path(float w, float h, float mg, float R, float th, u32 c, floa
 }
 static void neon_ring(float w, float h, float z)
 {
-    ring_path(w, h, 2.5f, 15.5f, 3.2f, neon_glow(), z);
-    ring_path(w, h, 2.0f, 15.0f, 2.1f, C(th_acc), z + 0.002f);
+    ring_path(w, h, 2.5f, 15.5f, 5.0f, neon_glow(), z);
+    ring_path(w, h, 2.0f, 15.0f, 2.4f, C(th_acc), z + 0.002f);
 }
 
 /* Spinning compact disc: a rim, a dark body, two sheen wedges that rotate with the music and a hub. */
@@ -1458,29 +1355,6 @@ static void icon_cd(float cx, float cy, float r, float z)
     for (int w = 0; w < 2; w++) {
         for (int i = 0; i < 3; i++) {
             const float a0 = cd_phase + (float)w * 3.14159f + (float)i * 0.32f, a1 = a0 + 0.32f;
-            C2D_DrawTriangle(cx, cy, cMid, cx + cosf(a0) * rr, cy + sinf(a0) * rr, cLite,
-                             cx + cosf(a1) * rr, cy + sinf(a1) * rr, cLite, z + 0.006f);
-        }
-    }
-    C2D_DrawCircleSolid(cx, cy, z + 0.008f, r * 0.36f, cAcc);
-    C2D_DrawCircleSolid(cx, cy, z + 0.010f, r * 0.17f, C(th_bg));
-}
-
-/* Static CD used by browser rows. It deliberately does not read cd_phase, so the
- * library artwork never animates when another song starts playing. */
-static void icon_cd_static(float cx, float cy, float r, float z)
-{
-    const u32 cAcc = C(th_acc), cGl = neon_glow();
-    const u32 cBody = C(mix_rgb(th_bg, th_tx, 36));
-    const u32 cMid  = C(mix_rgb(th_bg, th_acc, 90));
-    const u32 cLite = C(mix_rgb(th_acc, th_tx, 150));
-    const float rr = (r - 1.5f) * 0.97f;
-    C2D_DrawCircleSolid(cx, cy, z, r + 1.5f, cGl);
-    C2D_DrawCircleSolid(cx, cy, z + 0.002f, r, cAcc);
-    C2D_DrawCircleSolid(cx, cy, z + 0.004f, r - 1.4f, cBody);
-    for (int w = 0; w < 2; w++) {
-        for (int i = 0; i < 3; i++) {
-            const float a0 = (float)w * 3.14159f + (float)i * 0.32f, a1 = a0 + 0.32f;
             C2D_DrawTriangle(cx, cy, cMid, cx + cosf(a0) * rr, cy + sinf(a0) * rr, cLite,
                              cx + cosf(a1) * rr, cy + sinf(a1) * rr, cLite, z + 0.006f);
         }
@@ -1995,12 +1869,12 @@ static void draw_top(void)
     if (!use_flow && S.display_mode != 0) {
         pv_draw();
     } else if (use_flow) {
-        FlowItem items[8];
-        const int base = (int)floorf(flow_pos) - 3;
+        FlowItem items[10];
+        const int base = (int)floorf(flow_pos) - 4;
         const int ci = (int)floorf(flow_pos + 0.5f);
         const bool playing_view = !browsing_view();
 
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < 10; i++) {
             int idx = base + i;
             memset(&items[i], 0, sizeof items[i]);
             if (idx < 0 || idx >= L.n || fabsf((float)idx - flow_pos) > FLOW_SIDE + 0.6f) continue;
@@ -2027,13 +1901,12 @@ static void draw_top(void)
         }
 
         /* the 3D-style cover carousel, unchanged */
-        flow_draw(items, 8, base, flow_pos, flow_appear, top_bg_color);
+        flow_draw(items, 10, base, flow_pos, flow_appear, top_bg_color);
     } else if (art_ready()) {
         /* the cover settles in with a tiny scale-up and breathes with the bass (both off in Battery saver) */
         const float ease = art_fade * art_fade * (3.0f - 2.0f * art_fade);
         const float k = S.saver ? 1.0f : (0.94f + 0.06f * ease) * (1.0f + 0.010f * vis_bass);
         const float sz = ART_SZ * k, ox = ART_X + (ART_SZ - sz) / 2.0f, oy = ART_Y + (ART_SZ - sz) / 2.0f;
-        rrect(ox - 2.0f, oy - 2.0f, sz + 4.0f, sz + 4.0f, 7.0f, 0.16f, neon_glow());
         C2D_DrawImageAt(*art_image(), ox, oy, 0.40f, NULL, sz / 128.0f, sz / 128.0f);
         if (art_fade < 0.999f) {
             C2D_DrawRectSolid(ox, oy, 0.41f, sz, sz,
@@ -2045,13 +1918,7 @@ static void draw_top(void)
 
     /* ---- label right under the artwork + music information beside it ---- */
     draw_state_label();
-    /* Album-cover mode gets the compact track facts; the analytic visualizers
-     * use the full-width panel instead, so their graphs are never obscured. */
-    if (S.display_mode == 0) {
-        float cards_a = info_a;
-        if (flow_appear > 0.35f) cards_a *= (1.0f - (flow_appear - 0.35f) / 0.65f);
-        draw_info_cards(cards_a);
-    }
+    if (S.display_mode == 0) draw_info_cards(info_a * (1.0f - flow_appear));
 
     /* ---- song panel: the same look as a highlighted row on the bottom screen ---- */
     const float py = 176, ph = 40, pcy = py + ph / 2;
@@ -2288,10 +2155,7 @@ static void draw_deck(void)
     u32 dur = track_loaded ? cur.duration_ms : 0;
     float frac = slider_drag ? slider_frac : progress_frac(pos, dur);
     neon_box(6, y, 114, h, 13, 0.20f, cAcc, cGlow, cFill);
-    /* The bottom mini-player is deliberately artwork-free. Use the same CD language
-     * as the transport instead, while the full album artwork remains on the top screen. */
-    rrect(9.0f, y + 4.0f, 38.0f, 38.0f, 7.0f, 0.18f, cTrk);
-    icon_cd(28.0f, y + 23.0f, 10.5f, playing ? 0.56f : 0.40f);
+    icon_cd(23, y + 18, 10.0f, 0.45f);
     char sub[48];
     if (slider_drag) {
         char a[16], b[16];
@@ -2302,8 +2166,8 @@ static void draw_deck(void)
         snprintf(sub, sizeof sub, "%s", track_loaded ? cur.artist : "Pick a song");
     }
     const char *title = track_loaded ? (cur.title[0] ? cur.title : base_name(cur_path)) : "Not playing";
-    draw_marquee(title, 50, y + 1, 0.49f, track_loaded ? cAcc : cText, 62, 0);
-    if (sub[0]) draw_marquee(sub, 50, y + 18, 0.33f, cDim, 62, 1);
+    draw_text(title, 38, y + 2, 0.50f, track_loaded ? cAcc : cText, C2D_AlignLeft, 78);
+    if (sub[0]) draw_text(sub, 38, y + 18, 0.34f, cDim, C2D_AlignLeft, 78);
 
     const float tw = SL_X1 - SL_X0, ty = y + 33;
     rrect(SL_X0, ty - 2, tw, 4, 2, 0.30f, cTrk);
@@ -2349,7 +2213,6 @@ static void draw_browser(void)
     u32 cGrey    = C(mix_rgb(th_bg, th_tx, 42));            /* grey rim */
     u32 cGreyGl  = C(mix_rgb(th_bg, th_tx, 14));
     u32 cHeart   = C(mix_rgb(th_tx, th_bg, 70));
-    u32 cTrk     = C(mix_rgb(th_bg, th_acc, 70));
     char buf[32];
 
     /* ---- tabs: All Songs | Liked Songs | Queue (Queue opens Up Next) ---- */
@@ -2410,18 +2273,31 @@ static void draw_browser(void)
         if (selected) neon_box(RX, y, RW, RH, 11, 0.20f, cAcc, cGlow, cRowSel);
         else          neon_box(RX, y, RW, RH, 11, 0.20f, cGrey, cGreyGl, cRowFill);
 
-        /* Bottom-screen library rows intentionally use a CD instead of album artwork.
-         * Album art belongs to the top-screen carousel / Now Playing view; keeping it
-         * out of the browser makes the list cleaner and avoids duplicate artwork. */
+        /* cover thumbnail (or a tile while it is still loading / for folders) */
         const float ts = 30, tx = RX + 7, tyy = y + (RH - ts) / 2;
-        if (e->is_dir) {
-            Rgb tc = mix_rgb(th_sel, th_tx, 60);
-            rrect(tx, tyy, ts, ts, 6, 0.30f, C(tc));
-            C2D_DrawRectSolid(tx + 6, tyy + 9, 0.45f, 8, 4, cText);
-            C2D_DrawRectSolid(tx + 6, tyy + 12, 0.45f, 18, 12, cText);
+        C3D_Tex *tex = NULL;
+        if (!e->is_dir) {
+            if (cur_row && art_ready()) tex = art_image()->tex;
+            else { float fd; tex = flow_tex(idx, &fd); }
+        }
+        if (tex) {
+            draw_thumb(tex, tx, tyy, ts, 0.30f);
         } else {
-            rrect(tx, tyy, ts, ts, 6, 0.18f, cTrk);
-            icon_cd_static(tx + ts / 2.0f, tyy + ts / 2.0f, 10.5f, playing ? 0.56f : 0.38f);
+            Rgb tc = e->is_dir ? mix_rgb(th_sel, th_tx, 60) : tile_color(e->name);
+            rrect(tx, tyy, ts, ts, 6, 0.30f, C(tc));
+            if (e->is_dir) {
+                C2D_DrawRectSolid(tx + 6, tyy + 9, 0.45f, 8, 4, cText);
+                C2D_DrawRectSolid(tx + 6, tyy + 12, 0.45f, 18, 12, cText);
+            } else if (!playing) {
+                icon_small_note(tx + 8.5f, tyy + 7, cText);
+            }
+        }
+        if (playing) {                                      /* animated bars over the thumbnail */
+            if (tex) C2D_DrawRectSolid(tx, tyy + ts - 14, 0.42f, ts, 14, C2D_Color32(0, 0, 0, 170));
+            for (int k = 0; k < 3; k++) {
+                float hb = 3.0f + 9.0f * (0.5f + 0.5f * sinf(eq_phase * 2.0f + k * 1.7f));
+                C2D_DrawRectSolid(tx + 7 + k * 7, tyy + ts - 3 - hb, 0.45f, 4, hb, cAcc);
+            }
         }
 
         const float lx = RX + 46;
@@ -2589,7 +2465,7 @@ static void draw_wizard_top(void)         /* welcome and controls pages (the set
     }
 }
 
-/* ------------------------------------------------------- battery / display */
+/* ------------------------------------------------------- battery / wallpaper */
 static void batt_poll(void)                 /* called about every 2 s while the battery readout is on */
 {
     u8 lvl = 0, chg = 0;
@@ -2601,6 +2477,7 @@ static void batt_poll(void)                 /* called about every 2 s while the 
     if (ptm_ok && R_SUCCEEDED(PTMU_GetBatteryChargeState(&chg))) batt_chg = chg != 0;
 }
 
+static const char *UI_WALLPAPER_NAMES[5] = { "Plain", "Scanlines", "Dots", "Corners", "Grid" };
 static const char *UI_DISPLAY_NAMES[4]   = { "Cover", "LED Spectrum", "Scope", "VU Deck" };
 static const char *UI_BATT_NAMES[2]      = { "Icon", "Percent" };
 static const char *UI_CLOCK_NAMES[3]     = { "Off", "12-hour", "24-hour" };
@@ -2610,6 +2487,7 @@ static const char *UI_LY_FONT_NAMES[3]   = { "System", "Bold", "Compact" };
 static const char *row_label(int r)
 {
     switch (r) {
+    case ROW_PRESET:       return "Theme";
     case ROW_GLOW:         return "Ambient glow";
     case ROW_FADE:         return "Cover fade";
     case ROW_DISPLAY:      return "Visualizer";
@@ -2619,7 +2497,6 @@ static const char *row_label(int r)
     case ROW_CLOCK:        return "Clock";
     case ROW_BATT:         return "Battery";
     case ROW_BATTSTYLE:    return "Battery style";
-    case ROW_BRIGHTNESS:   return "Brightness";
     case ROW_OLED:         return "OLED mode";
     case ROW_GLOWCOL:      return "Glow color";
     case ROW_DYN:          return "Album colors";
@@ -2645,6 +2522,7 @@ static void row_value(int r, char *out, size_t cap)
     const char *s = "";
     out[0] = 0;
     switch (r) {
+    case ROW_PRESET:    s = (S.preset >= 0 && S.preset < PRESET_COUNT) ? PRESET_NAMES[S.preset] : "Custom"; break;
     case ROW_GLOW:      s = GLOW_NAMES[(unsigned)S.glow % GLOW_COUNT]; break;
     case ROW_FADE:      s = FADE_NAMES[(unsigned)S.fade_speed % FADE_COUNT]; break;
     case ROW_DISPLAY:   s = UI_DISPLAY_NAMES[(unsigned)S.display_mode % 4]; break;
@@ -2652,7 +2530,6 @@ static void row_value(int r, char *out, size_t cap)
     case ROW_CLOCK:     s = UI_CLOCK_NAMES[(unsigned)S.clock_mode % 3]; break;
     case ROW_GLOWCOL:   s = GLOWCOL_NAMES[(unsigned)S.glow_color % GLOWCOL_COUNT]; break;
     case ROW_BATTSTYLE: s = UI_BATT_NAMES[(unsigned)S.batt_style % 2]; break;
-    case ROW_BRIGHTNESS: snprintf(out, cap, "%d / 5", S.brightness); return;
     case ROW_LY_FONT:   s = UI_LY_FONT_NAMES[(unsigned)S.ly_font % 3]; break;
     case ROW_SEEK:      snprintf(out, cap, "%d s", S.seek_step); return;
     case ROW_SLEEP_TIMER: snprintf(out, cap, "%d min", S.sleep_minutes); return;
@@ -2710,7 +2587,7 @@ static void draw_card(int card)
     const int n = CARD_LEN[card];
     char val[48];
 
-    rrect(6, 66, 308, n * rh + 8, 12, 0.26f, cCard);
+    rrect(6, 66, 308, n * rh + 8, 10, 0.26f, cCard);
     for (int i = 0; i < n; i++) {
         int r = CARD_ROWS[card][i];
         float y = 70.0f + i * rh;
@@ -2720,16 +2597,7 @@ static void draw_card(int card)
 
         row_text(row_label(r), 18, y, rh, 0.45f, (r == ROW_EXIT || r == ROW_LY_CLEAR) ? cDanger : cText, C2D_AlignLeft, is_switch_row(r) ? 190 : 128);
 
-        if (r == ROW_BRIGHTNESS) {
-            /* Real brightness slider: easy to understand at a glance and draggable. */
-            const float sx = 160.0f, sw = 140.0f, sy = y + rh / 2.0f;
-            rrect(sx, sy - 3, sw, 6, 3, 0.30f, cBg);
-            const float frac = ((float)S.brightness - 1.0f) / 4.0f;
-            rrect(sx, sy - 3, sw * frac, 6, 3, 0.32f, cAcc);
-            C2D_DrawCircleSolid(sx + sw * frac, sy, 0.34f, 5.2f, cAcc);
-            char bv[8]; snprintf(bv, sizeof bv, "%d", S.brightness);
-            row_text(bv, 304, y, rh, 0.40f, cText, C2D_AlignRight, 18);
-        } else if (is_switch_row(r)) {
+        if (is_switch_row(r)) {
             if (r == ROW_SLEEP_ENABLE && sleep_timer_active) {          /* live countdown beside the label */
                 s64 left = (s64)sleep_timer_deadline - (s64)osGetTime();
                 fmt_time(val, sizeof val, left > 0 ? (u32)left : 0);
@@ -2816,8 +2684,8 @@ static void draw_settings(void)
     u32 cCard = C(mix_rgb(th_bg, th_sel, 150));
     int page = row_page(set_row);
 
-    draw_text("SETTINGS", 14, 2, 0.78f, cText, C2D_AlignLeft, 220);
-    draw_text(PAGE_NAMES[page], 14, 25, 0.38f, cAcc, C2D_AlignLeft, 190);
+    draw_text("Settings", 14, 2, 0.85f, cText, C2D_AlignLeft, 220);
+    draw_text(PAGE_NAMES[page], 14, 26, 0.34f, cDim, C2D_AlignLeft, 160);
     rrect(250, 6, 62, 22, 11, 0.30f, cAcc);                      /* Done pill (touch: y < 40, x >= 244) */
     row_text("Done", 281, 6, 22, 0.45f, cBg, C2D_AlignCenter, 0);
 
@@ -2908,7 +2776,7 @@ static void draw_wizard_bottom(void)
     u32 cDanger = C2D_Color32(255, 90, 95, 255);
     char buf[64];
 
-    draw_text(WZ_TITLE[wz_page], 14, 2, 0.82f, cText, C2D_AlignLeft, 220);
+    draw_text(WZ_TITLE[wz_page], 14, 2, 0.85f, cText, C2D_AlignLeft, 220);
     if (wz_page < WZ_N - 1) {
         rrect(250, 6, 62, 22, 11, 0.30f, cSel);
         row_text("Skip", 281, 6, 22, 0.45f, cDim, C2D_AlignCenter, 0);
@@ -3131,14 +2999,6 @@ static void card_touch(touchPosition tp, int card)
     if (r == ROW_EXIT)  { confirm_exit = true; confirm_sel = 0; return; }
     if (r == ROW_GUIDE) { start_wizard(); return; }
     if (r == ROW_LY_CLEAR) { clear_lyrics_cache(); return; }
-    if (r == ROW_BRIGHTNESS) {
-        if (tp.px >= 148 && tp.px <= 306) {
-            int v = 1 + (int)lroundf(((float)(tp.px - 160) / 140.0f) * 4.0f);
-            if (v < 1) v = 1; if (v > 5) v = 5;
-            if (v != S.brightness) { S.brightness = v; screen_brightness_apply(); mark_dirty(); }
-        }
-        return;
-    }
     if (is_switch_row(r)) { set_adjust(+1); return; }
 
     if (is_slider_row(r)) {
@@ -3568,7 +3428,6 @@ int main(void)
 
     settings_defaults(&S);
     settings_load(&S);
-    screen_brightness_apply();
     theme_update(1.0f / 60.0f);
     aptHook(&lid_hook_cookie, apt_lid_hook, NULL);
     apply_lid();

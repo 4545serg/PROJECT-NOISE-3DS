@@ -13,7 +13,7 @@
 
 #define SLOTS      20
 #define COVER_DIR  DATA_DIR "/covers"
-#define CACHE_MAGIC 0x33435A4Eu          /* "NZC3" - invalidate pre-fix cover cache */
+#define CACHE_MAGIC 0x31435A4Eu          /* "NZC1" */
 #define CX        200.0f       /* screen-space centre of the flow (top screen is 400 wide) */
 #define CY        90.0f        /* vertical centre of the covers (cover is 124 tall at y=28; keep in sync with ART_* in main.c) */
 #define FACE      124.0f       /* face-on cover size */
@@ -85,34 +85,6 @@ static int load_job(const char *path, u8 *px)
     int state = 2;
     if (meta_read(path, &m, &art, &asz, false) && art && asz && art_decode(art, asz, px)) state = 1;
     free(art);
-
-    /* High-success artwork fallback: many perfectly valid music libraries keep
-     * cover.jpg/folder.jpg/album.jpg/front.jpg beside the audio instead of embedding APIC. */
-    if (state != 1) {
-        const char *slash = strrchr(path, '/');
-        char dir[800];
-        if (slash) {
-            size_t dn = (size_t)(slash - path + 1);
-            if (dn >= sizeof dir) dn = sizeof dir - 1;
-            memcpy(dir, path, dn); dir[dn] = 0;
-        } else { dir[0] = 0; }
-        static const char *names[] = { "cover.jpg", "cover.jpeg", "cover.png", "folder.jpg", "folder.png", "album.jpg", "album.png", "front.jpg", "front.png" };
-        for (unsigned ni = 0; ni < sizeof(names)/sizeof(names[0]) && state != 1; ni++) {
-            char ap[800];
-            snprintf(ap, sizeof ap, "%s%s", dir, names[ni]);
-            FILE *af = fopen(ap, "rb");
-            if (!af) continue;
-            fseek(af, 0, SEEK_END);
-            long alen = ftell(af);
-            fseek(af, 0, SEEK_SET);
-            if (alen > 0 && alen <= 3 * 1024 * 1024L) {
-                u8 *ab = malloc((size_t)alen);
-                if (ab && fread(ab, 1, (size_t)alen, af) == (size_t)alen && art_decode(ab, (size_t)alen, px)) state = 1;
-                free(ab);
-            }
-            fclose(af);
-        }
-    }
 
     cf = fopen(cpath, "wb");
     if (cf) {
@@ -354,19 +326,7 @@ static void draw_item(const FlowItem *it, float o, float appear, FlowBgFn bgf)
 
     C2D_Image img;
     img.tex = it->tex;
-
-    /* The centre card is the hero artwork. Draw it as one clean square so it never
-     * inherits the perspective strip seams used by the side cards. The side cards
-     * continue through the perspective path below. */
-    if (t < 0.02f) {
-        const float hs = FACE;
-        const float x0 = CX - hs / 2.0f;
-        const float y0 = CY - hs / 2.0f;
-        C2D_DrawImageAt(img, x0, y0, z, NULL, 1.0f, 1.0f);
-        return;
-    }
-
-    int n = (int)ceilf(w / 3.0f);
+    int n = (t < 0.02f) ? 1 : (int)ceilf(w / 3.0f);
     if (n < 1) n = 1;
     float refl = REFLECT;
 
