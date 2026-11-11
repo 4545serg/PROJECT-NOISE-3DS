@@ -56,7 +56,7 @@ enum {                         /* settings rows, grouped in four pages */
     ROW_PRESET, ROW_OLED, ROW_GLOWCOL, ROW_GLOW, ROW_DYN, ROW_WALLPAPER,       /* Look    */
     ROW_EQMAN, ROW_EQPRE, ROW_B0, ROW_B1, ROW_B2, ROW_B3, ROW_B4,              /* Audio   */
     ROW_DISPLAY, ROW_FADE, ROW_INFO, ROW_RESUME, ROW_SEEK,                     /* Player  */
-    ROW_LY_SEARCH, ROW_LY_DL, ROW_LY_OFFLINE, ROW_LY_SYNC, ROW_LY_CLEAR,       /* Lyrics  */
+    ROW_LY_SEARCH, ROW_LY_DL, ROW_LY_OFFLINE, ROW_LY_SYNC, ROW_LY_FONT, ROW_LY_CLEAR, /* Lyrics */
     ROW_CLOCK, ROW_BATT, ROW_BATTSTYLE, ROW_SAVER,                             /* General */
     ROW_SLEEP_ENABLE, ROW_SLEEP_TIMER, ROW_GUIDE, ROW_EXIT,
     SET_ROWS
@@ -65,17 +65,17 @@ enum {                         /* settings rows, grouped in four pages */
 /* "Cards" are lists of settings rows drawn as one inset panel. Cards 0 and 2 are the Look and General
  * tabs (the Sound tab has its own layout); CARD_SETUP is the single combined page of the first-run setup. */
 enum { CARD_LOOK, CARD_SOUND, CARD_PLAYER, CARD_GENERAL, CARD_SETUP, CARD_LYRICS, CARD_COUNT };
-static const int   ROWS_LOOK[]    = { ROW_PRESET, ROW_OLED, ROW_GLOWCOL, ROW_GLOW, ROW_DYN, ROW_WALLPAPER };
+static const int   ROWS_LOOK[]    = { ROW_OLED, ROW_GLOWCOL, ROW_GLOW, ROW_DYN };
 static const int   ROWS_PLAYER[]  = { ROW_DISPLAY, ROW_FADE, ROW_INFO, ROW_RESUME, ROW_SEEK };
 static const int   ROWS_GENERAL[] = { ROW_CLOCK, ROW_BATT, ROW_BATTSTYLE, ROW_SAVER, ROW_SLEEP_ENABLE, ROW_SLEEP_TIMER, ROW_GUIDE, ROW_EXIT };
 static const int   ROWS_SETUP[]   = { ROW_PRESET, ROW_GLOW, ROW_CLOCK, ROW_BATT };
-static const int   ROWS_LYRICS[]  = { ROW_LY_SEARCH, ROW_LY_DL, ROW_LY_OFFLINE, ROW_LY_SYNC, ROW_LY_CLEAR };
+static const int   ROWS_LYRICS[]  = { ROW_LY_SEARCH, ROW_LY_DL, ROW_LY_OFFLINE, ROW_LY_SYNC, ROW_LY_FONT, ROW_LY_CLEAR };
 static const int  *CARD_ROWS[CARD_COUNT] = { ROWS_LOOK, NULL, ROWS_PLAYER, ROWS_GENERAL, ROWS_SETUP, ROWS_LYRICS };
-static const int   CARD_LEN[CARD_COUNT]  = { 6, 0, 5, 8, 4, 5 };
-static const float CARD_ROWH[CARD_COUNT] = { 26.0f, 0.0f, 28.0f, 19.5f, 25.0f, 28.0f };
+static const int   CARD_LEN[CARD_COUNT]  = { 4, 0, 5, 8, 4, 6 };
+static const float CARD_ROWH[CARD_COUNT] = { 36.0f, 0.0f, 28.0f, 19.5f, 25.0f, 25.0f };
 #define PAGES 5
 static const int   PAGE_CARD[PAGES]      = { CARD_LOOK, CARD_SOUND, CARD_PLAYER, CARD_LYRICS, CARD_GENERAL };
-static const int   TAB_FIRST[PAGES]      = { ROW_PRESET, ROW_EQMAN, ROW_DISPLAY, ROW_LY_SEARCH, ROW_CLOCK };
+static const int   TAB_FIRST[PAGES]      = { ROW_OLED, ROW_EQMAN, ROW_DISPLAY, ROW_LY_SEARCH, ROW_CLOCK };
 static const char *PAGE_NAMES[PAGES]     = { "Look", "Audio", "Player", "Lyrics", "General" };
 #define TAB_W   60             /* settings tab strip: PAGES segments of TAB_W px starting at x = 10 */
 
@@ -328,9 +328,11 @@ static u32 top_bg_color(float x, float y)              /* also handed to the cov
 
 /* The glow is a grid of gouraud-shaded cells. Vertex colours only depend on the glow colour, its strength and
  * the theme, so they are cached and rebuilt only while the colour is actually easing toward a new cover. */
-#define GLOW_COLS    (TOP_W / 20)
-#define GLOW_BANDS   7
-static const float GLOW_YS[GLOW_BANDS + 1] = { 0, 22, 58, 94, 130, 166, 200, SCR_H };
+/* Keep the ambient mesh deliberately coarse: the glow is intentionally soft,
+ * and fewer quads leave more GPU time for scrolling, artwork and audio UI. */
+#define GLOW_COLS    (TOP_W / 40)
+#define GLOW_BANDS   5
+static const float GLOW_YS[GLOW_BANDS + 1] = { 0, 40, 80, 120, 170, SCR_H };
 
 static void top_background(void)
 {
@@ -344,12 +346,12 @@ static void top_background(void)
         memcpy(key, now, sizeof key);
         for (int yi = 0; yi <= GLOW_BANDS; yi++)
             for (int xi = 0; xi <= GLOW_COLS; xi++)
-                mesh[yi * (GLOW_COLS + 1) + xi] = top_bg_color((float)xi * 20.0f, GLOW_YS[yi]);
+                mesh[yi * (GLOW_COLS + 1) + xi] = top_bg_color((float)xi * 40.0f, GLOW_YS[yi]);
     }
     for (int yi = 0; yi < GLOW_BANDS; yi++) {
         for (int xi = 0; xi < GLOW_COLS; xi++) {
             const u32 *a = &mesh[yi * (GLOW_COLS + 1) + xi], *b = a + (GLOW_COLS + 1);
-            C2D_DrawRectangle((float)xi * 20.0f, GLOW_YS[yi], 0.02f, 20.0f, GLOW_YS[yi + 1] - GLOW_YS[yi],
+            C2D_DrawRectangle((float)xi * 40.0f, GLOW_YS[yi], 0.02f, 40.0f, GLOW_YS[yi + 1] - GLOW_YS[yi],
                               a[0], a[1], b[0], b[1]);
         }
     }
@@ -833,7 +835,7 @@ static bool is_switch_row(int r)
            r == ROW_LY_SEARCH || r == ROW_LY_DL || r == ROW_LY_OFFLINE || r == ROW_LY_SYNC;
 }
 static bool is_band_row(int r)   { return r >= ROW_B0 && r <= ROW_B4; }
-static bool is_choice_row(int r) { return r == ROW_PRESET || r == ROW_EQPRE || r == ROW_CLOCK || r == ROW_GLOW || r == ROW_FADE || r == ROW_DISPLAY || r == ROW_WALLPAPER || r == ROW_SEEK || r == ROW_SLEEP_TIMER || r == ROW_GLOWCOL || r == ROW_BATTSTYLE; }
+static bool is_choice_row(int r) { return r == ROW_PRESET || r == ROW_EQPRE || r == ROW_CLOCK || r == ROW_GLOW || r == ROW_FADE || r == ROW_DISPLAY || r == ROW_WALLPAPER || r == ROW_SEEK || r == ROW_SLEEP_TIMER || r == ROW_GLOWCOL || r == ROW_BATTSTYLE || r == ROW_LY_FONT; }
 
 static int card_pos(int card, int row)            /* index of `row` inside a card, or -1 */
 {
@@ -1042,6 +1044,8 @@ static void set_adjust(int dir)
         S.ly_offline = !S.ly_offline;
     } else if (set_row == ROW_LY_SYNC) {
         S.ly_sync = !S.ly_sync;
+    } else if (set_row == ROW_LY_FONT) {
+        S.ly_font = (S.ly_font + dir + 3) % 3;
     } else {
         return;
     }
@@ -1288,9 +1292,12 @@ static void rrect(float x, float y, float w, float h, float r, float z, u32 c)
 /* ---- neon building blocks shared by the top and bottom screens ----
  * Everything is "dark panel + bright rim + faint halo", like the reference mock-up. Colours come from the
  * theme (accent / bg / text), so the other presets simply recolour the same layout. */
-static u32 neon_glow(void)                                                   /* halo behind a lit rim */
+static u32 neon_glow(void)                                                   /* restrained halo behind a lit rim */
 {
-    return C(mix_rgb(th_bg, th_glow, S.saver ? 50 : (S.oled ? 90 : 70)));
+    /* The previous halo was bright enough to compete with artwork and cost
+     * a lot of overdraw.  Keep the neon identity, but make it a supporting
+     * effect rather than the main visual element. */
+    return C(mix_rgb(th_bg, th_glow, S.saver ? 28 : (S.oled ? 58 : 44)));
 }
 
 static void neon_box(float x, float y, float w, float h, float r, float z, u32 rim, u32 glow, u32 fill)
@@ -1335,8 +1342,8 @@ static void ring_path(float w, float h, float mg, float R, float th, u32 c, floa
 }
 static void neon_ring(float w, float h, float z)
 {
-    ring_path(w, h, 2.5f, 15.5f, 5.0f, neon_glow(), z);
-    ring_path(w, h, 2.0f, 15.0f, 2.4f, C(th_acc), z + 0.002f);
+    ring_path(w, h, 2.5f, 15.5f, 3.2f, neon_glow(), z);
+    ring_path(w, h, 2.0f, 15.0f, 2.1f, C(th_acc), z + 0.002f);
 }
 
 /* Spinning compact disc: a rim, a dark body, two sheen wedges that rotate with the music and a hub. */
@@ -1867,12 +1874,12 @@ static void draw_top(void)
     if (!use_flow && S.display_mode != 0) {
         pv_draw();
     } else if (use_flow) {
-        FlowItem items[10];
-        const int base = (int)floorf(flow_pos) - 4;
+        FlowItem items[8];
+        const int base = (int)floorf(flow_pos) - 3;
         const int ci = (int)floorf(flow_pos + 0.5f);
         const bool playing_view = !browsing_view();
 
-        for (int i = 0; i < 10; i++) {
+        for (int i = 0; i < 8; i++) {
             int idx = base + i;
             memset(&items[i], 0, sizeof items[i]);
             if (idx < 0 || idx >= L.n || fabsf((float)idx - flow_pos) > FLOW_SIDE + 0.6f) continue;
@@ -1899,7 +1906,7 @@ static void draw_top(void)
         }
 
         /* the 3D-style cover carousel, unchanged */
-        flow_draw(items, 10, base, flow_pos, flow_appear, top_bg_color);
+        flow_draw(items, 8, base, flow_pos, flow_appear, top_bg_color);
     } else if (art_ready()) {
         /* the cover settles in with a tiny scale-up and breathes with the bass (both off in Battery saver) */
         const float ease = art_fade * art_fade * (3.0f - 2.0f * art_fade);
@@ -1916,7 +1923,13 @@ static void draw_top(void)
 
     /* ---- label right under the artwork + music information beside it ---- */
     draw_state_label();
-    if (S.display_mode == 0) draw_info_cards(info_a * (1.0f - flow_appear));
+    /* Album-cover mode gets the compact track facts; the analytic visualizers
+     * use the full-width panel instead, so their graphs are never obscured. */
+    if (S.display_mode == 0) {
+        float cards_a = info_a;
+        if (flow_appear > 0.35f) cards_a *= (1.0f - (flow_appear - 0.35f) / 0.65f);
+        draw_info_cards(cards_a);
+    }
 
     /* ---- song panel: the same look as a highlighted row on the bottom screen ---- */
     const float py = 176, ph = 40, pcy = py + ph / 2;
@@ -1982,6 +1995,23 @@ static float fit_scale(const char *s, float sc, float maxw)       /* shrink a li
     return sc;
 }
 
+static float ly_font_scale(float sc)
+{
+    if (S.ly_font == 2) return sc * 0.88f;
+    return sc;
+}
+
+static void ly_draw_text(const char *s, float x, float y, float sc, u32 color, u32 align, float maxw)
+{
+    sc = ly_font_scale(sc);
+    if (S.ly_font == 1) {
+        /* Bold style: two sub-pixel-offset passes using the same native 3DS font.
+         * This keeps the build self-contained while making the lyric face visibly heavier. */
+        draw_text(s, x + 0.55f, y, sc, color, align, maxw);
+    }
+    draw_text(s, x, y, sc, color, align, maxw);
+}
+
 static const char *ly_state_msg(LyState st, const char **sub)
 {
     switch (st) {
@@ -2024,8 +2054,8 @@ static void draw_lyrics_top(void)
     if (!ready) {
         const char *sub;
         const char *msg = ly_state_msg(st, &sub);
-        draw_text(msg, 200, 92, 0.62f, cText, C2D_AlignCenter, 370);
-        draw_text(sub, 200, 118, 0.42f, cDim, C2D_AlignCenter, 370);
+        ly_draw_text(msg, 200, 92, 0.62f, cText, C2D_AlignCenter, 370);
+        ly_draw_text(sub, 200, 118, 0.42f, cDim, C2D_AlignCenter, 370);
         if (st == LY_LOADING) {
             const float ts = pv_tsec();
             for (int k = 0; k < 3; k++) {
@@ -2063,7 +2093,7 @@ static void draw_lyrics_top(void)
             float a = fminf((y - 28.0f) / 12.0f, (206.0f - y) / 12.0f);
             if (a <= 0.02f) continue;
             if (a > 1.0f) a = 1.0f;
-            draw_text(lyrics_text(i), 200, y, 0.50f, Ca(th_tx, a), C2D_AlignCenter, 366);
+            ly_draw_text(lyrics_text(i), 200, y, 0.50f, Ca(th_tx, a), C2D_AlignCenter, 366);
         }
         if (n > 8) {                                                   /* scroll position */
             rrect(391, 36, 4, 164, 2, 0.08f, cTrk);
@@ -2094,7 +2124,7 @@ static void draw_lyrics_top(void)
 /* ====================================================================== bottom-screen UI
  * Layout (320 x 240):   header 5..31 | tabs 36..60 | song list 66..190 | deck 194..236
  * Layering (citro2d depth: higher z = in front, equal z = draw order, text is always z 0.5):
- *   0.10 frame   0.12 wallpaper   0.20 panels / rims / insets   0.22 buttons   0.26 press flash
+ *   0.10 frame   0.20 panels / rims / insets   0.22 buttons   0.26 press flash
  *   0.30 widgets   0.45 icons   0.46 toast
  */
 static void draw_frame(void)                  /* neon outline + dark fill for the whole bottom screen */
@@ -2335,39 +2365,46 @@ static void draw_lyrics_bottom(void)
     const u32 cGrey = C(mix_rgb(th_bg, th_tx, 42)), cGreyGl = C(mix_rgb(th_bg, th_tx, 14));
     const LyState st = lyrics_state();
     const bool ready = (st == LY_READY);
+    const char *title = cur.title[0] ? cur.title : base_name(cur_path);
+    const char *artist = cur.artist[0] ? cur.artist : "Unknown artist";
 
-    draw_text("Lyrics", 14, 2, 0.85f, cText, C2D_AlignLeft, 220);
-    rrect(250, 6, 62, 22, 11, 0.30f, cAcc);                      /* Back pill (touch: y < 40, x >= 244) */
+    draw_text("Lyrics", 14, 2, 0.85f, cText, C2D_AlignLeft, 180);
+    rrect(250, 6, 62, 22, 11, 0.30f, cAcc);
     row_text("Back", 281, 6, 22, 0.45f, cBg, C2D_AlignCenter, 0);
 
-    /* song + what happened */
-    char line[96];
+    /* Clean song header: one compact card, no duplicated status prose. */
+    neon_box(8, 44, 304, 48, 12, 0.18f, cAcc, cGlow, cFill);
+    ly_draw_text(title, 18, 48, 0.52f, cAcc, C2D_AlignLeft, 248);
+    ly_draw_text(artist, 18, 66, 0.38f, cText, C2D_AlignLeft, 248);
+    const char *chip = ready ? (lyrics_synced() ? "SYNC" : "TEXT") :
+                       (st == LY_LOADING ? "SEARCH" : (st == LY_OFFLINE ? "OFFLINE" : ""));
+    if (chip[0]) row_text(chip, 292, 48, 22, 0.36f, cAcc, C2D_AlignRight, 50);
+
+    /* Primary action is always in the same place, so it is fast to reach. */
+    if (!ready) {
+        const bool can = !S.ly_offline && st != LY_LOADING;
+        const char *lab = S.ly_offline ? "Offline only" : (st == LY_LOADING ? "Searching..." : "Search online  (A)");
+        neon_box(8, 100, 304, 34, 17, 0.20f, can ? cAcc : cGrey, can ? cGlow : cGreyGl, cFill);
+        row_text(lab, 160, 100, 34, 0.46f, can ? cAcc : cDim, C2D_AlignCenter, 280);
+    } else {
+        const char *hint = lyrics_synced() ? "Synced to playback" : "D-pad Up / Down to scroll";
+        ly_draw_text(hint, 160, 104, 0.40f, cDim, C2D_AlignCenter, 296);
+    }
+
+    /* Source/status line and a single settings entry keep the screen uncluttered. */
+    char status[96];
     if (ready) {
         const char *src = lyrics_source();
         if (!strcmp(src, "cache")) src = "SD cache";
         else if (!strcmp(src, "file")) src = ".lrc file";
-        snprintf(line, sizeof line, "%s lyrics - %s", lyrics_synced() ? "Synced" : "Plain text", src);
+        snprintf(status, sizeof status, "%s  •  %s", lyrics_synced() ? "Synced" : "Plain text", src);
     } else {
         const char *sub;
-        snprintf(line, sizeof line, "%s", ly_state_msg(st, &sub));
+        snprintf(status, sizeof status, "%s", ly_state_msg(st, &sub));
     }
-    neon_box(8, 46, 304, 58, 12, 0.20f, cAcc, cGlow, cFill);
-    const char *title = cur.title[0] ? cur.title : base_name(cur_path);
-    draw_text(title, 20, 51, 0.52f, cAcc, C2D_AlignLeft, 280);
-    draw_text(cur.artist[0] ? cur.artist : "Unknown artist", 20, 69, 0.40f, cText, C2D_AlignLeft, 280);
-    draw_text(line, 20, 84, 0.38f, cDim, C2D_AlignLeft, 280);
-
-    /* Search online */
-    if (!ready) {
-        const bool can = !S.ly_offline && st != LY_LOADING;
-        const char *lab = S.ly_offline ? "Offline only - search disabled" : (st == LY_LOADING ? "Searching..." : "Search online  (A)");
-        neon_box(8, 112, 304, 32, 16, 0.20f, can ? cAcc : cGrey, can ? cGlow : cGreyGl, cFill);
-        row_text(lab, 160, 112, 32, 0.46f, can ? cAcc : cDim, C2D_AlignCenter, 280);
-    } else {
-        draw_text(lyrics_synced() ? "Lines follow the song" : "D-pad Up / Down  scrolls the text", 160, 120, 0.40f, cDim, C2D_AlignCenter, 296);
-    }
-    neon_box(8, 150, 304, 32, 16, 0.20f, cGrey, cGreyGl, cFill);
-    row_text("Lyrics settings  (SELECT)", 160, 150, 32, 0.46f, cText, C2D_AlignCenter, 280);
+    ly_draw_text(status, 160, 140, 0.34f, cDim, C2D_AlignCenter, 296);
+    neon_box(8, 154, 304, 28, 14, 0.16f, cGrey, cGreyGl, cFill);
+    row_text("Lyrics settings  (SELECT)", 160, 154, 28, 0.42f, cText, C2D_AlignCenter, 280);
 
     draw_deck();
 }
@@ -2455,33 +2492,7 @@ static const char *UI_WALLPAPER_NAMES[5] = { "Plain", "Scanlines", "Dots", "Corn
 static const char *UI_DISPLAY_NAMES[4]   = { "Cover", "LED Spectrum", "Scope", "VU Deck" };
 static const char *UI_BATT_NAMES[2]      = { "Icon", "Percent" };
 static const char *UI_CLOCK_NAMES[3]     = { "Off", "12-hour", "24-hour" };
-
-/* Faint decoration behind the bottom screen (Settings > Appearance > Wallpaper). Drawn just above the
- * background gradient and below everything else. */
-static void draw_wallpaper_accents(float w, float h)
-{
-    if (S.wallpaper <= 0 || S.wallpaper > 4) return;
-    const float z = 0.12f, m = 4.0f;                              /* stay inside the neon frame */
-    u32 c  = C(mix_rgb(th_bg, th_acc, 22));
-    u32 c2 = C(mix_rgb(th_bg, th_acc, 34));
-    switch (S.wallpaper) {
-    case 1:                                                       /* scanlines */
-        for (float y = 5; y < h - m; y += 6) C2D_DrawRectSolid(m, y, z, w - 2 * m, 1, c);
-        break;
-    case 2:                                                       /* dot grid */
-        for (float y = 8; y < h - m; y += 16)
-            for (float x = 8; x < w - m; x += 16) C2D_DrawRectSolid(x, y, z, 2, 2, c2);
-        break;
-    case 3:                                                       /* corner glows */
-        C2D_DrawTriangle(m, m, c2, 90, m, c, m, 90, c, z);
-        C2D_DrawTriangle(w - m, h - m, c2, w - 90, h - m, c, w - m, h - 90, c, z);
-        break;
-    case 4:                                                       /* grid */
-        for (float x = 40; x < w - m; x += 40) C2D_DrawRectSolid(x, m, z, 1, h - 2 * m, c);
-        for (float y = 40; y < h - m; y += 40) C2D_DrawRectSolid(m, y, z, w - 2 * m, 1, c);
-        break;
-    }
-}
+static const char *UI_LY_FONT_NAMES[3]   = { "System", "Bold", "Compact" };
 
 /* ------------------------------------------------------------ settings UI */
 static const char *row_label(int r)
@@ -2491,14 +2502,13 @@ static const char *row_label(int r)
     case ROW_GLOW:         return "Ambient glow";
     case ROW_FADE:         return "Cover fade";
     case ROW_DISPLAY:      return "Visualizer";
-    case ROW_WALLPAPER:    return "Wallpaper";
     case ROW_EQMAN:        return "Manual EQ";
     case ROW_EQPRE:        return "EQ preset";
     case ROW_SEEK:         return "Skip length";
     case ROW_CLOCK:        return "Clock";
     case ROW_BATT:         return "Battery";
     case ROW_BATTSTYLE:    return "Battery style";
-    case ROW_OLED:         return "OLED black";
+    case ROW_OLED:         return "OLED mode";
     case ROW_GLOWCOL:      return "Glow color";
     case ROW_DYN:          return "Album colors";
     case ROW_INFO:         return "Track info";
@@ -2511,6 +2521,7 @@ static const char *row_label(int r)
     case ROW_LY_DL:        return "Auto download";
     case ROW_LY_OFFLINE:   return "Offline only";
     case ROW_LY_SYNC:      return "Prefer synced";
+    case ROW_LY_FONT:      return "Lyrics font";
     case ROW_LY_CLEAR:     return "Clear lyrics cache";
     case ROW_EXIT:         return "Exit app";
     }
@@ -2526,11 +2537,11 @@ static void row_value(int r, char *out, size_t cap)
     case ROW_GLOW:      s = GLOW_NAMES[(unsigned)S.glow % GLOW_COUNT]; break;
     case ROW_FADE:      s = FADE_NAMES[(unsigned)S.fade_speed % FADE_COUNT]; break;
     case ROW_DISPLAY:   s = UI_DISPLAY_NAMES[(unsigned)S.display_mode % 4]; break;
-    case ROW_WALLPAPER: s = UI_WALLPAPER_NAMES[(unsigned)S.wallpaper % 5]; break;
     case ROW_EQPRE:     s = EQ_PRESET_NAMES[(unsigned)S.eq_preset % EQ_PRESET_COUNT]; break;
     case ROW_CLOCK:     s = UI_CLOCK_NAMES[(unsigned)S.clock_mode % 3]; break;
     case ROW_GLOWCOL:   s = GLOWCOL_NAMES[(unsigned)S.glow_color % GLOWCOL_COUNT]; break;
     case ROW_BATTSTYLE: s = UI_BATT_NAMES[(unsigned)S.batt_style % 2]; break;
+    case ROW_LY_FONT:   s = UI_LY_FONT_NAMES[(unsigned)S.ly_font % 3]; break;
     case ROW_SEEK:      snprintf(out, cap, "%d s", S.seek_step); return;
     case ROW_SLEEP_TIMER: snprintf(out, cap, "%d min", S.sleep_minutes); return;
     default: break;
@@ -2945,7 +2956,9 @@ static void lyrics_ask(bool force)                 /* look up lyrics for the loa
     LyTrack t;
     lyrics_identify(&t, cur_path, cur.title, cur.artist, cur.duration_ms);
     const LyOptions o = ly_opts();
-    lyrics_request(&t, &o, force);
+    /* Cache/sidecar reads are tiny and synchronous; adopt them before starting
+     * the network worker so opening Lyrics feels instant when an .lrc already exists. */
+    if (!lyrics_preload(&t, &o)) lyrics_request(&t, &o, force);
     snprintf(ly_asked, sizeof ly_asked, "%s", cur_path);
     ly_pos = 0.0f;
     ly_goal = 0.0f;
@@ -3574,8 +3587,8 @@ int main(void)
             if (kd & KEY_TOUCH) {
                 if (tp.py < 40) { if (tp.px >= 244) lyrics_open = false; }
                 else if (tp.py >= CTRL_TOP) handle_ctrl_tap(tp.px, tp.py);
-                else if (tp.py >= 112 && tp.py < 144 && lyrics_state() != LY_READY) ly_search_now();
-                else if (tp.py >= 150 && tp.py < 182) { settings_open = true; set_row = ROW_LY_SEARCH; }
+                else if (tp.py >= 100 && tp.py < 134 && lyrics_state() != LY_READY) ly_search_now();
+                else if (tp.py >= 154 && tp.py < 182) { settings_open = true; set_row = ROW_LY_SEARCH; }
             }
             if ((kh & KEY_TOUCH) && slider_drag) slider_frac = frac_from_px(tp.px);
             if ((ku & KEY_TOUCH) && slider_drag) { seek_to(slider_frac); slider_drag = false; }
@@ -3664,7 +3677,10 @@ int main(void)
         if (S.show_batt) { if (--batt_timer <= 0) { batt_poll(); batt_timer = S.saver ? 300 : 120; } }   /* every ~2 s (5 s in Battery saver) */
         resume_tick();
         lyrics_pump();                                              /* adopt a finished background lookup */
-        if (lyrics_open && track_loaded && strcmp(ly_asked, cur_path) != 0) lyrics_ask(false);   /* song changed */
+        if (track_loaded && strcmp(ly_asked, cur_path) != 0) {
+            if (S.ly_search) lyrics_ask(false);                       /* prefetch while the song plays */
+            else if (lyrics_open) lyrics_ask(false);
+        }
 
         {   /* bottom-screen page change -> soft cross-fade (none in Battery saver) */
             const int bk = bot_state_key();
@@ -3696,7 +3712,6 @@ int main(void)
         C2D_SceneBegin(bot);
         bg_gradient(BOT_W);
         draw_frame();
-        draw_wallpaper_accents(BOT_W, SCR_H);
         if (search_busy > 0) draw_search_busy();
         else if (confirm_exit) draw_exit_confirm();
         else if (wizard_open) draw_wizard_bottom();

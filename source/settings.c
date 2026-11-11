@@ -106,6 +106,7 @@ void settings_defaults(Settings *s)
     s->ly_download = true;
     s->ly_offline = false;
     s->ly_sync = true;
+    s->ly_font = 0;
     settings_apply_eq_preset(s, 0);
     s->shuffle = false;
     s->sleep_minutes = 15;
@@ -192,6 +193,8 @@ void settings_load(Settings *s)
             s->ly_offline = atoi(value) != 0;
         else if (!strcmp(key, "ly_sync"))
             s->ly_sync = atoi(value) != 0;
+        else if (!strcmp(key, "ly_font"))
+            s->ly_font = atoi(value);
         else if (!strcmp(key, "ui_ver"))
             s->ui_ver = atoi(value);
         else if (!strcmp(key, "setup_done"))
@@ -215,6 +218,7 @@ void settings_load(Settings *s)
     if (s->fade_speed < 0 || s->fade_speed >= FADE_COUNT) s->fade_speed = 1;
     if (s->display_mode < 0 || s->display_mode > 3) s->display_mode = 0;
     if (s->wallpaper < 0 || s->wallpaper > 4) s->wallpaper = 0;
+    if (s->ly_font < 0 || s->ly_font > 2) s->ly_font = 0;
     if (s->glow_color < 0 || s->glow_color >= GLOWCOL_COUNT) s->glow_color = 0;
     if (s->batt_style < 0 || s->batt_style > 1) s->batt_style = 0;
     {
@@ -274,6 +278,7 @@ bool settings_save(const Settings *s)
     fprintf(f, "ly_download=%d\n", s->ly_download ? 1 : 0);
     fprintf(f, "ly_offline=%d\n", s->ly_offline ? 1 : 0);
     fprintf(f, "ly_sync=%d\n", s->ly_sync ? 1 : 0);
+    fprintf(f, "ly_font=%d\n", s->ly_font);
     fprintf(f, "ui_ver=%d\n", s->ui_ver);
     fprintf(f, "setup_done=%d\n", s->setup_done ? 1 : 0);
     fprintf(f, "shuffle=%d\n", s->shuffle ? 1 : 0);

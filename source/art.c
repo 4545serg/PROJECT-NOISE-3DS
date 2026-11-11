@@ -36,9 +36,13 @@ static u32 morton_interleave(u32 x, u32 y)
 
 static u32 morton_offset(u32 x, u32 y, u32 bpp)
 {
-    u32 i = morton_interleave(x, y);
-    u32 offset = (x & ~7u) * 8;
-    return (i + offset) * bpp;
+    /* PICA200 stores each 8x8 tile in Morton order.  The tile stride is
+     * based on the coarse X coordinate; Y is already encoded by the Morton
+     * index.  Including a separate coarse-Y stride corrupts textures (and
+     * can address past the 128x128 allocation). */
+    const u32 morton = morton_interleave(x, y);
+    const u32 coarse_x = x & ~7u;
+    return (morton + coarse_x * 8u) * bpp;
 }
 
 static void release_tex(void)
@@ -85,8 +89,7 @@ bool art_decode(const unsigned char *data, size_t size, unsigned char *out)
             }
             if (!cnt) cnt = 1;
 
-            u32 coarse_y = (u32)dj & ~7u;
-            u32 o = morton_offset((u32)i, (u32)dj, 4) + coarse_y * ART_SIZE * 4;
+            u32 o = morton_offset((u32)i, (u32)dj, 4);
             dst[o + 0] = (unsigned char)(a / cnt);        /* GPU RGBA8 = bytes A,B,G,R */
             dst[o + 1] = (unsigned char)(b / cnt);
             dst[o + 2] = (unsigned char)(g / cnt);
