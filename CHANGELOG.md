@@ -1,3 +1,8 @@
+## 2026-11-11 — Lyrics network reliability
+
+- Added a TLS fallback for the 3DS lyrics HTTP client: verified HTTPS is attempted first, then the same read-only request is retried with certificate verification disabled when the console cannot validate the provider certificate chain.
+- Preserved background lookup, SD-card caching, LRCLIB lookup/fallbacks, and playback independence.
+
 # Changelog
 
 ## Unreleased
