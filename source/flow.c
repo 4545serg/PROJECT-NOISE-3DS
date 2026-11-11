@@ -26,8 +26,6 @@
 typedef struct {
     int      idx, gen, state;  /* state: 0 free, 1 own texture, 2 no artwork (placeholder) */
     unsigned last_use, born;
-    bool     has_rgb;          /* rgb = ambient colour of the cover (only for state 1) */
-    u32      rgb;
     C3D_Tex  tex;
 } Slot;
 
@@ -47,8 +45,6 @@ static int           g_nwant;
 static int           g_busy = -1;                 /* index being loaded right now */
 static bool          g_mb_full;                   /* one finished cover waiting for upload */
 static int           g_mb_idx, g_mb_gen, g_mb_state;
-static bool          g_mb_has_rgb;
-static u32           g_mb_rgb;
 static u8           *g_mb_px;                     /* the loader decodes straight into this */
 
 /* ------------------------------------------------------- loader thread */
@@ -101,8 +97,6 @@ static void loader(void *arg)
     (void)arg;
     while (!g_quit) {
         FlowWant job;
-        job.idx = -1;
-        job.path[0] = 0;
         int gen = 0;
         bool have = false;
 
@@ -120,15 +114,9 @@ static void loader(void *arg)
         if (!have) { svcSleepThread(8 * 1000 * 1000LL); continue; }
 
         int st = load_job(job.path, g_mb_px);
-        u32 rgb = 0;
-        bool has_rgb = (st == 1) && art_color_of(g_mb_px, &rgb);      /* ambient colour, cheap */
 
         LightLock_Lock(&g_lk);
-        if (gen == g_gen) {
-            g_mb_idx = job.idx; g_mb_gen = gen; g_mb_state = st;
-            g_mb_has_rgb = has_rgb; g_mb_rgb = rgb;
-            g_mb_full = true;
-        }
+        if (gen == g_gen) { g_mb_idx = job.idx; g_mb_gen = gen; g_mb_state = st; g_mb_full = true; }
         g_busy = -1;
         LightLock_Unlock(&g_lk);
     }
@@ -189,14 +177,6 @@ static Slot *find(int idx)
     return NULL;
 }
 
-bool flow_color(int idx, u32 *rgb)
-{
-    Slot *s = find(idx);
-    if (!s || s->state != 1 || !s->has_rgb) return false;
-    *rgb = s->rgb;
-    return true;
-}
-
 bool flow_known(int idx)
 {
     if (find(idx)) return true;
@@ -235,8 +215,6 @@ bool flow_pump(void)
     LightLock_Lock(&g_lk);
     bool full = g_mb_full;
     int idx = g_mb_idx, gen = g_mb_gen, st = g_mb_state;
-    bool has_rgb = g_mb_has_rgb;
-    u32 rgb = g_mb_rgb;
     LightLock_Unlock(&g_lk);
     if (!full) return false;
 
@@ -255,8 +233,6 @@ bool flow_pump(void)
         v->idx = idx;
         v->gen = g_gen;
         v->state = (st == 1 && art_upload(&v->tex, g_mb_px)) ? 1 : 2;
-        v->has_rgb = (v->state == 1) && has_rgb;
-        v->rgb = rgb;
         v->last_use = g_tick;
         v->born = g_tick;
     }
@@ -287,7 +263,7 @@ static void quad_solid(float xl, float xr, float hl, float hr, u32 c, float z)
     C2D_DrawTriangle(xr, tr, c, xr, br, c, xl, bl, c, z);
 }
 
-static void draw_item(const FlowItem *it, float o, float appear, FlowBgFn bgf)
+static void draw_item(const FlowItem *it, float o, float appear, u32 bg)
 {
     float ao = fabsf(o), s = (o < 0) ? -1.0f : 1.0f;
     float t = clampf(ao, 0.0f, 1.0f);                   /* 0 = face-on, 1 = fully turned */
@@ -296,7 +272,6 @@ static void draw_item(const FlowItem *it, float o, float appear, FlowBgFn bgf)
     float disp = t * (FACE / 2 + INNER_GAP + SIDE_W / 2) + d * STEP;
     float cx = CX + s * disp * appear;
     float xl = cx - w / 2, xr = cx + w / 2;
-    u32 bg = bgf(cx, CY);                                /* background colour right behind this cover */
 
     float H  = FACE - 3.0f * fminf(d, 3.0f);
     float hi = H * (1.0f - 0.16f * t);                   /* edge nearest the centre is further away */
@@ -331,15 +306,10 @@ static void draw_item(const FlowItem *it, float o, float appear, FlowBgFn bgf)
     float refl = REFLECT;
 
     /* one tint for both effects: cross-fade card -> cover (fade-in) and dim toward the background */
-    float unfaded = 1.0f - clampf(it->fade, 0.0f, 1.0f);            /* 1 = still the flat card, 0 = cover fully in */
-    float tint_blend = 1.0f - (1.0f - unfaded) * (1.0f - dim);
+    float f1 = 1.0f - clampf(it->fade, 0.0f, 1.0f);
+    float tint_blend = 1.0f - (1.0f - f1) * (1.0f - dim);
     u32 tint_col = bg;
-    if (tint_blend > 0.001f) tint_col = mix32(bg, it->color, unfaded * (1.0f - dim) / tint_blend);
-
-    /* reflection fades into the real (glow-tinted) background: sample it once per strip edge, not per corner */
-    float hmax = fmaxf(hl, hr);
-    float ry0 = CY + hmax / 2 + 1, ry1 = ry0 + hmax * refl;
-    u32 bg_top = bgf(xl, ry0), bg_bot = bgf(xl, ry1);               /* colours at the current strip's left edge */
+    if (tint_blend > 0.001f) tint_col = mix32(bg, it->color, f1 * (1.0f - dim) / tint_blend);
 
     for (int i = 0; i < n; i++) {
         float f0 = (float)i / n, f1 = (float)(i + 1) / n;
@@ -364,26 +334,22 @@ static void draw_item(const FlowItem *it, float o, float appear, FlowBgFn bgf)
         sub.height = (u16)rh;
         sub.top = 0.0f; sub.bottom = refl;
         p.pos.y = CY + h / 2 + 1; p.pos.h = rh; p.depth = z - 0.02f;
-        float top_b = clampf(0.74f + dim + unfaded, 0.0f, 1.0f), bot_b = 1.0f;
-        u32 next_top = (i + 1 < n) ? bgf(x1, ry0) : bgf(xr, ry0);
-        u32 next_bot = (i + 1 < n) ? bgf(x1, ry1) : bgf(xr, ry1);
-        C2D_SetImageTint(&tint, C2D_TopLeft,  bg_top,   top_b);
-        C2D_SetImageTint(&tint, C2D_TopRight, next_top, top_b);
-        C2D_SetImageTint(&tint, C2D_BotLeft,  bg_bot,   bot_b);
-        C2D_SetImageTint(&tint, C2D_BotRight, next_bot, bot_b);
+        float top_b = clampf(0.74f + dim, 0.0f, 1.0f), bot_b = 1.0f;
+        C2D_SetImageTint(&tint, C2D_TopLeft,  bg, top_b);
+        C2D_SetImageTint(&tint, C2D_TopRight, bg, top_b);
+        C2D_SetImageTint(&tint, C2D_BotLeft,  bg, bot_b);
+        C2D_SetImageTint(&tint, C2D_BotRight, bg, bot_b);
         C2D_DrawImage(img, &p, &tint);
-        bg_top = next_top;                                           /* this strip's right edge is the next one's left */
-        bg_bot = next_bot;
     }
 }
 
-void flow_draw(const FlowItem *items, int n, int base, float pos, float appear, FlowBgFn bg)
+void flow_draw(const FlowItem *items, int n, int base, float pos, float appear, u32 bg)
 {
     int centre = -1;
     float best = 1e9f;
     for (int i = 0; i < n; i++) {
         float o = (float)(base + i) - pos;
-        if (fabsf(o) < best) { best = fabsf(o); centre = i; }
+        if (items[i].kind && fabsf(o) < best) { best = fabsf(o); centre = i; }
     }
     for (int i = 0; i < n; i++) {
         if (!items[i].kind) continue;

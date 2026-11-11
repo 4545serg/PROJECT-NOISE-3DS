@@ -7,7 +7,6 @@
 
 #include <strings.h>
 
-#include "libcfg.h"
 #include "dr_flac.h"
 #include "meta.h"
 #include "minimp3.h"
@@ -127,7 +126,6 @@ static void apply_volume(int v)
 
 static bool decode_mp3(s16 *dst, int *frames, int *hz)
 {
-    if (!fp) return false;
     for (;;) {
         if (!in_eof && inlen - inoff < REFILL_BELOW) {
             if (inoff) {
@@ -168,7 +166,6 @@ static bool decode_mp3(s16 *dst, int *frames, int *hz)
 
 static bool decode_wav(s16 *dst, int *frames, int *hz)
 {
-    if (!fp) return false;
     u32 want = FRAME_SAMPLES * (u32)wav.align;
     if (want > wav_left) want = wav_left - wav_left % wav.align;
     if (!want) return false;
@@ -261,8 +258,7 @@ static bool open_track(const char *path, u32 start, float frac)
         if (!wav_parse(fp, &wav, NULL)) return false;
         bool ok_fmt = (wav.tag == 1 && (wav.bits == 8 || wav.bits == 16 || wav.bits == 24 || wav.bits == 32)) ||
                       (wav.tag == 3 && wav.bits == 32);
-        if (!ok_fmt || wav.channels == 0 || wav.channels > 8 || wav.align == 0 ||
-            wav.align < wav.channels * (wav.bits / 8) || wav.align > 32) return false;
+        if (!ok_fmt || wav.channels > 8 || wav.align < wav.channels * (wav.bits / 8) || wav.align > 32) return false;
         wav_left = wav.data_size - wav.data_size % wav.align;
         u32 skip = 0;
         if (frac >= 0.0f) skip = (u32)((float)(wav_left / wav.align) * frac) * wav.align;
