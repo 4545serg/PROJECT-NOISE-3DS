@@ -2327,6 +2327,7 @@ static void draw_browser(void)
     u32 cGrey    = C(mix_rgb(th_bg, th_tx, 42));            /* grey rim */
     u32 cGreyGl  = C(mix_rgb(th_bg, th_tx, 14));
     u32 cHeart   = C(mix_rgb(th_tx, th_bg, 70));
+    u32 cTrk     = C(mix_rgb(th_bg, th_acc, 70));
     char buf[32];
 
     /* ---- tabs: All Songs | Liked Songs | Queue (Queue opens Up Next) ---- */
