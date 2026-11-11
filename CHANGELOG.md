@@ -46,6 +46,8 @@
 - README reorganised (contents, Favorites and Limits sections, accurate build instructions and source layout).
 
 ### Fixed
+- **Build failed** (`implicit declaration` errors) because the neon redesign dropped `batt_poll`, `draw_card`,
+  `draw_settings`, `draw_queue` and `draw_wallpaper_accents`; they are restored in `source/main.c`.
 - **`make cia` aborted** because `BasicInfo/Title` in `resources/app.rsf` was 13 characters; makerom allows 8.
 - **Repeat-one** replayed the playlist track instead of the song that had just finished when that song had been
   started from Up Next.
