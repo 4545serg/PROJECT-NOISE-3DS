@@ -26,12 +26,15 @@
 #include "noise.h"
 
 /* ---------------------------------------------------------------- layout */
-#define LIST_TOP   64
-#define ROW_H      25
+#define LIST_TOP   66          /* song list: 4 rows of ROW_H, scrollbar column on the right */
+#define ROW_H      31
 #define VIS_ROWS   4
-#define CTRL_TOP   168
-#define SL_X0      44          /* seek slider track, x range */
-#define SL_X1      274
+#define CTRL_TOP   194         /* now-playing deck: Now Playing | transport | volume */
+#define SL_X0      14          /* seek line inside the Now Playing capsule, x range */
+#define SL_X1      112
+#define VOL_X0     268         /* volume bar inside the volume capsule, x range */
+#define VOL_X1     304
+#define SB_TAP_X   300         /* touches right of this x in the list hit the scrollbar */
 #define SB_X0      38          /* search bar starts after the Home button */
 #define SS_X0      96          /* settings slider track, x range */
 #define SS_X1      244
@@ -172,6 +175,8 @@ static float     eq_phase = 0.0f;      /* drives the equalizer bars */
 static bool      quit_req = false;
 static char      cur_path[800];
 static bool      slider_drag = false;
+static int       vol_pct = 100;       /* software volume (on top of the 3DS volume slider) */
+static bool      vol_drag = false;
 static float     slider_frac = 0.0f;
 
 /* ---------------------------------------------------------------- colour */
@@ -497,8 +502,8 @@ static void prev_track(void)
 static void follow_playing(void);
 
 static void flash_ctrl(float x) { ctrl_flash_x = x; ctrl_flash_t = CTRL_FLASH_FRAMES; }
-static void skip_next(void) { if (Q.n == 0 && manual_queue_count == 0) return; flash_ctrl(232); flow_show = false; next_track(true); follow_playing(); }
-static void skip_prev(void) { if (Q.n == 0) return; flash_ctrl(168); flow_show = false; prev_track(); follow_playing(); }
+static void skip_next(void) { if (Q.n == 0 && manual_queue_count == 0) return; flash_ctrl(208); flow_show = false; next_track(true); follow_playing(); }
+static void skip_prev(void) { if (Q.n == 0) return; flash_ctrl(156); flow_show = false; prev_track(); follow_playing(); }
 
 static void toggle_play(void)
 {
@@ -650,9 +655,10 @@ static void ensure_meta(Entry *e)
     char path[800];
     snprintf(path, sizeof path, "%s%s", L.dir, e->name);
     TrackMeta m;
-    if (meta_read(path, &m, NULL, NULL, false)) {
+    if (meta_read(path, &m, NULL, NULL, true)) {
         snprintf(e->title, sizeof e->title, "%s", m.title);
         snprintf(e->artist, sizeof e->artist, "%s", m.artist);
+        e->duration_ms = m.duration_ms;
     }
     e->meta_loaded = true;
 }
@@ -1073,6 +1079,107 @@ static void rrect(float x, float y, float w, float h, float r, float z, u32 c)
     C2D_DrawCircleSolid(x + w - r, y + h - r, z, r, c);
 }
 
+/* ---- neon building blocks shared by the top and bottom screens ----
+ * Everything is "dark panel + bright rim + faint halo", like the reference mock-up. Colours come from the
+ * theme (accent / bg / text), so the other presets simply recolour the same layout. */
+static u32 neon_glow(void) { return C(mix_rgb(S.bg, S.accent, 70)); }        /* halo behind a lit rim */
+
+static void neon_box(float x, float y, float w, float h, float r, float z, u32 rim, u32 glow, u32 fill)
+{
+    rrect(x - 1.5f, y - 1.5f, w + 3, h + 3, r + 1.5f, z, glow);
+    rrect(x, y, w, h, r, z + 0.002f, rim);
+    rrect(x + 1.6f, y + 1.6f, w - 3.2f, h - 3.2f, r > 2.0f ? r - 1.6f : 0.5f, z + 0.004f, fill);
+}
+
+static void neon_disc(float cx, float cy, float r, float z, u32 rim, u32 glow, u32 fill)
+{
+    C2D_DrawCircleSolid(cx, cy, z, r + 1.5f, glow);
+    C2D_DrawCircleSolid(cx, cy, z + 0.002f, r, rim);
+    C2D_DrawCircleSolid(cx, cy, z + 0.004f, r - 1.6f, fill);
+}
+
+/* outline around a whole screen. It also paints the inside, so draw wallpaper accents after it. */
+static void neon_frame(float w, float h, float z)
+{
+    rrect(0, 0, w, h, 17, z, neon_glow());
+    rrect(1, 1, w - 2, h - 2, 16, z + 0.002f, C(S.accent));
+    rrect(3, 3, w - 6, h - 6, 14, z + 0.004f, C(S.bg));
+}
+
+/* LED-style equalizer: stacks of small squares; animated while music plays, a fixed pattern otherwise */
+static void icon_eq(float x, float y, float w, float h, bool live, u32 c)
+{
+    const int cols = 4, rows = 5;
+    const float cw = w / cols, rh = h / rows;
+    static const int idle[4] = { 2, 4, 3, 1 };
+    for (int i = 0; i < cols; i++) {
+        int lvl = idle[i];
+        if (live) lvl = 1 + (int)((0.5f + 0.5f * sinf(eq_phase * 1.9f + (float)i * 1.7f)) * (float)(rows - 1) + 0.5f);
+        for (int r = 0; r < lvl && r < rows; r++)
+            C2D_DrawRectSolid(x + i * cw, y + h - (float)(r + 1) * rh, 0.45f, cw - 1.0f, rh - 1.0f, c);
+    }
+}
+
+static void icon_heart_z(float cx, float cy, float s, u32 c, float z)
+{
+    C2D_DrawCircleSolid(cx - s * 0.5f, cy - s * 0.3f, z, s * 0.56f, c);
+    C2D_DrawCircleSolid(cx + s * 0.5f, cy - s * 0.3f, z, s * 0.56f, c);
+    C2D_DrawTriangle(cx - s * 1.02f, cy - s * 0.12f, c, cx + s * 1.02f, cy - s * 0.12f, c, cx, cy + s * 0.95f, c, z);
+}
+static void icon_heart(float cx, float cy, float s, u32 c) { icon_heart_z(cx, cy, s, c, 0.45f); }
+static void icon_heart_line(float cx, float cy, float s, u32 rim, u32 fill)   /* outlined heart; fill = what lies behind it */
+{
+    icon_heart_z(cx, cy, s, rim, 0.45f);
+    icon_heart_z(cx, cy + s * 0.05f, s * 0.68f, fill, 0.46f);
+}
+
+static void icon_home(float cx, float cy, u32 c, u32 door)
+{
+    C2D_DrawTriangle(cx - 8, cy - 0.5f, c, cx + 8, cy - 0.5f, c, cx, cy - 8, c, 0.45f);
+    C2D_DrawRectSolid(cx - 5, cy - 0.5f, 0.45f, 10, 7.5f, c);
+    C2D_DrawRectSolid(cx - 1.5f, cy + 2.5f, 0.46f, 3, 4.5f, door);
+}
+
+static void icon_small_note(float x, float y, u32 c)      /* ~13x16 note, top-left at x,y */
+{
+    C2D_DrawCircleSolid(x + 4.5f, y + 12, 0.45f, 3.0f, c);
+    C2D_DrawRectSolid(x + 6.5f, y + 2, 0.45f, 2, 10, c);
+    C2D_DrawTriangle(x + 8.5f, y + 2, c, x + 12.5f, y + 6.5f, c, x + 8.5f, y + 8, c, 0.45f);
+}
+
+static void icon_list(float cx, float cy, u32 c)           /* playlist: three lines with bullets */
+{
+    for (int i = 0; i < 3; i++) {
+        C2D_DrawCircleSolid(cx - 6, cy - 4 + i * 4, 0.45f, 1.2f, c);
+        C2D_DrawRectSolid(cx - 3, cy - 5 + i * 4, 0.45f, 9, 2, c);
+    }
+}
+
+static void icon_speaker(float cx, float cy, bool waves, u32 c)
+{
+    C2D_DrawRectSolid(cx - 6, cy - 2.5f, 0.45f, 4, 5, c);
+    C2D_DrawTriangle(cx - 2, cy - 2.5f, c, cx + 3, cy - 6, c, cx + 3, cy + 6, c, 0.45f);
+    C2D_DrawTriangle(cx - 2, cy - 2.5f, c, cx + 3, cy + 6, c, cx - 2, cy + 2.5f, c, 0.45f);
+    if (waves) {
+        C2D_DrawLine(cx + 5.5f, cy - 3.5f, c, cx + 7.0f, cy, c, 1.5f, 0.45f);
+        C2D_DrawLine(cx + 7.0f, cy, c, cx + 5.5f, cy + 3.5f, c, 1.5f, 0.45f);
+    }
+}
+
+/* cover thumbnail: the whole texture squeezed into a sz x sz square (same orientation as the cover flow) */
+static void draw_thumb(C3D_Tex *tex, float x, float y, float sz, float z)
+{
+    Tex3DS_SubTexture sub;
+    C2D_Image img;
+    C2D_DrawParams p;
+    sub.width = (u16)sz; sub.height = (u16)sz;
+    sub.left = 0.0f; sub.right = 1.0f; sub.top = 1.0f; sub.bottom = 0.0f;
+    img.tex = tex; img.subtex = &sub;
+    p.pos.x = x; p.pos.y = y; p.pos.w = sz; p.pos.h = sz;
+    p.center.x = 0; p.center.y = 0; p.depth = z; p.angle = 0;
+    C2D_DrawImage(img, &p, NULL);
+}
+
 static Rgb tile_color(const char *s)
 {
     unsigned h = 5381;
@@ -1088,42 +1195,41 @@ static float progress_frac(u32 pos, u32 dur)
     return f;
 }
 
-static void draw_status_bar(void)
+static void draw_status_bar(void)         /* battery / sleep-timer marks, tucked into the clock capsule */
 {
-    /* The reference header already contains the status information. Keep battery/sleep state as a
-     * tiny green indicator at the extreme right so it does not compete with the clock. */
-    if (sleep_timer_active) {
-        C2D_DrawCircleSolid(388, 28, 0.42f, 2.2f, C(S.accent));
-    }
+    u32 cAcc = C(S.accent), cTrk = C(mix_rgb(S.bg, S.accent, 90));
+    if (sleep_timer_active) C2D_DrawCircleSolid(385, 12.5f, 0.45f, 2.2f, cAcc);
     if (S.show_batt && batt_pct >= 0) {
-        float fw = 8.0f * (float)batt_pct / 100.0f;
-        rrect(378, 27, 10, 2, 1, 0.40f, C(S.select));
-        if (fw > 0.5f) rrect(378, 27, fw, 2, 1, 0.40f, C(S.accent));
-        if (batt_chg) C2D_DrawCircleSolid(374, 28, 0.42f, 1.5f, C(S.accent));
+        float fw = 14.0f * (float)batt_pct / 100.0f;
+        rrect(364, 10, 14, 5, 2.5f, 0.40f, cTrk);
+        if (fw >= 5.0f) rrect(364, 10, fw, 5, 2.5f, 0.42f, cAcc);
+        else C2D_DrawCircleSolid(366.5f, 12.5f, 0.42f, 2.5f, cAcc);
+        if (batt_chg) C2D_DrawCircleSolid(359.5f, 12.5f, 0.45f, 1.8f, cAcc);
     }
 }
 
 static void draw_visualizer(float x, float y, float size)
 {
     u32 accent = C(S.accent), soft = C(mix_rgb(S.accent, S.bg, 110));
-    float cx = x + size * 0.5f, cy = y + size * 0.5f;
+    float cx = x + size * 0.5f, cy = y + size * 0.5f, k = size / 134.0f;
     if (S.display_mode == 1) {
+        const float sp = (size - 13.2f) / 23.0f;
         for (int i = 0; i < 24; i++) {
             float a = sinf(eq_phase * (1.0f + (i % 5) * 0.13f) + i * 0.57f);
             float b = cosf(eq_phase * 0.63f + i * 0.31f);
-            float h = 15.0f + (a * 0.5f + 0.5f) * 74.0f + (b * 0.5f + 0.5f) * 20.0f;
-            rrect(x + 5 + i * 5.55f, cy - h * 0.5f, 3.2f, h, 1.6f, 0.40f, (i % 3) ? accent : soft);
+            float h = (15.0f + (a * 0.5f + 0.5f) * 74.0f + (b * 0.5f + 0.5f) * 20.0f) * k;
+            rrect(x + 5 + i * sp, cy - h * 0.5f, 3.2f, h, 1.6f, 0.40f, (i % 3) ? accent : soft);
         }
     } else if (S.display_mode == 2) {
         for (int i = 0; i < 38; i++) {
             float a = (float)i / 37.0f;
-            float yy = cy + sinf(a * 12.566f + eq_phase * 1.4f) * (18.0f + 17.0f * sinf(eq_phase * 0.7f + a * 6.28f));
+            float yy = cy + sinf(a * 12.566f + eq_phase * 1.4f) * (18.0f + 17.0f * sinf(eq_phase * 0.7f + a * 6.28f)) * k;
             C2D_DrawCircleSolid(x + 5 + a * (size - 10), yy, 0.40f, 2.2f, accent);
         }
         rrect(x + 5, cy - 1, size - 10, 2, 1, 0.35f, soft);
     } else {
         for (int ring = 0; ring < 3; ring++) {
-            float radius = 23.0f + ring * 19.0f;
+            float radius = (23.0f + ring * 19.0f) * k;
             for (int i = 0; i < 12; i++) {
                 float a = (float)i * 0.523599f + eq_phase * (ring % 2 ? -0.35f : 0.35f);
                 float pulse = 0.75f + 0.25f * sinf(eq_phase * 1.8f + i + ring);
@@ -1142,90 +1248,69 @@ static void row_text(const char *s, float x, float y, float rh, float sc, u32 co
     draw_text(s, x, y + (rh - 28.0f * sc) / 2.0f, sc, col, align, maxw);
 }
 
+/* the centre cover of the top screen: the cover flow (flow.c: CY / FACE) is drawn into this square */
+#define ART_X   138.0f
+#define ART_Y   28.0f
+#define ART_SZ  124.0f
+
+static bool track_is_favorite(void)
+{
+    size_t rl = strlen(MUSIC_ROOT);
+    const char *rel = strncmp(cur_path, MUSIC_ROOT, rl) == 0 ? cur_path + rl : cur_path;
+    return rel[0] && is_favorite(rel);
+}
+
 static void draw_top(void)
 {
     /*
-     * Neon top-screen skin.
-     *
-     * The carousel/flow renderer is deliberately left intact below: the centre
-     * artwork and side cards still move exactly as before.  Only the chrome,
-     * glow, title treatment and seek bar are restyled to match the neon-green
-     * reference.
+     * Neon top screen, built from the same pieces as the bottom screen: dark capsules with a bright rim
+     * and halo, a highlighted "selected row" panel for the song, and a LED equalizer. The cover flow
+     * renderer is untouched - it just draws into the framed square.
      */
-    const Rgb neon       = { 36, 255, 104 };
-    const Rgb neon_bright= { 70, 255, 126 };
-    const Rgb neon_dim   = { 12, 104, 42 };
-    const Rgb white      = { 238, 244, 242 };
-    const Rgb black      = { 0, 0, 0 };
-    const Rgb panel      = { 2, 8, 4 };
+    const u32 cAcc  = C(S.accent), cText = C(S.text), cBg = C(S.bg);
+    const u32 cDim  = C(mix_rgb(S.text, S.bg, 120));
+    const u32 cGlow = neon_glow();
+    const u32 cFill = C(mix_rgb(S.bg, S.accent, 8));
+    const u32 cRowSel = C(mix_rgb(S.bg, S.accent, 38));
+    const u32 cTrk  = C(mix_rgb(S.bg, S.accent, 70));
+    const bool playing = track_loaded && audio_is_active() && !audio_is_paused();
+    const bool use_flow = (S.display_mode == 0) && flow_appear > 0.01f && L.n > 0;
 
-    const u32 cNeon = C(neon);
-    const u32 cBright = C(neon_bright);
-    const u32 cDim = C(neon_dim);
-    const u32 cText = C(white);
-    const u32 cBlack = C(black);
-    const u32 cPanel = C(panel);
+    neon_frame(TOP_W, SCR_H, 0.03f);
 
-    /* Deep black base with a very subtle green lift behind the player. */
-    C2D_DrawRectSolid(0, 0, 0.01f, TOP_W, SCR_H, cBlack);
-    C2D_DrawRectangle(0, 0, 0.02f, TOP_W, SCR_H,
-                      C2D_Color32(0, 12, 5, 255), C2D_Color32(0, 4, 2, 255),
-                      C2D_Color32(0, 8, 3, 255), C2D_Color32(0, 2, 1, 255));
+    /* ---- header: brand + state | clock ---- */
+    neon_box(8, 4, S.clock_mode ? 250 : 384, 17, 8.5f, 0.08f, cAcc, cGlow, cFill);
+    icon_eq(17, 7, 14, 11, playing, cAcc);
+    row_text("PROJECT", 38, 4, 17, 0.40f, cText, C2D_AlignLeft, 70);
+    row_text("NOISE", 88, 4, 17, 0.40f, cAcc, C2D_AlignLeft, 56);
+    row_text(track_loaded && !browsing_view() ? "NOW PLAYING" : "BROWSING",
+             S.clock_mode ? 248 : 352, 4, 17, 0.30f, cDim, C2D_AlignRight, 100);
 
-    /* Outer neon frame: multiple passes create the soft tube-like bloom. */
-    rrect(0, 0, 400, 240, 18, 0.03f, C2D_Color32(7, 64, 25, 150));
-    rrect(1, 1, 398, 238, 17, 0.04f, C2D_Color32(15, 150, 53, 190));
-    rrect(2, 2, 396, 236, 16, 0.05f, cNeon);
-    rrect(5, 5, 390, 230, 13, 0.06f, cBlack);
-
-    /* Header capsules. */
-    rrect(8, 6, 264, 20, 10, 0.08f, C2D_Color32(6, 74, 29, 170));
-    rrect(9, 7, 262, 18, 9, 0.09f, cNeon);
-    rrect(12, 10, 256, 12, 6, 0.10f, cPanel);
-
-    rrect(276, 6, 116, 20, 10, 0.08f, C2D_Color32(6, 74, 29, 170));
-    rrect(277, 7, 114, 18, 9, 0.09f, cNeon);
-    rrect(280, 10, 108, 12, 6, 0.10f, cPanel);
-
-    /* Three-bar signal mark. */
-    for (int i = 0; i < 3; ++i) {
-        float h = 6.0f + i * 4.5f;
-        rrect(13 + i * 7.0f, 22.0f - h, 5.0f, h, 1.5f, 0.12f,
-              i == 2 ? cBright : cNeon);
+    if (S.clock_mode) {
+        neon_box(264, 4, 128, 17, 8.5f, 0.08f, cAcc, cGlow, cFill);
+        time_t now = time(NULL);
+        struct tm *tmv = localtime(&now);
+        if (tmv) {
+            static const char *wd[] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+            char cb[32];
+            if (S.clock_mode == 1) {
+                int hr = tmv->tm_hour % 12; if (hr == 0) hr = 12;
+                snprintf(cb, sizeof cb, "%02d/%02d %s %d:%02d%c", tmv->tm_mon + 1, tmv->tm_mday, wd[tmv->tm_wday],
+                         hr, tmv->tm_min, tmv->tm_hour < 12 ? 'a' : 'p');
+            } else {
+                snprintf(cb, sizeof cb, "%02d/%02d %s %02d:%02d", tmv->tm_mon + 1, tmv->tm_mday, wd[tmv->tm_wday],
+                         tmv->tm_hour, tmv->tm_min);
+            }
+            row_text(cb, 313, 4, 17, 0.34f, cText, C2D_AlignCenter, 88);
+        }
     }
+    draw_status_bar();
 
-    draw_text("PROJECT", 43, 8, 0.42f, cText, C2D_AlignLeft, 70);
-    draw_text("NOISE", 92, 8, 0.42f, cNeon, C2D_AlignLeft, 56);
-
-    time_t now = time(NULL);
-    struct tm *tmv = localtime(&now);
-    char clockbuf[32] = "11/10 (Tue) 15:24";
-    if (tmv) {
-        static const char *wd[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
-        snprintf(clockbuf, sizeof clockbuf, "%02d/%02d (%s) %02d:%02d",
-                 tmv->tm_mon + 1, tmv->tm_mday, wd[tmv->tm_wday],
-                 tmv->tm_hour, tmv->tm_min);
-    }
-    draw_text(clockbuf, 334, 8, 0.40f, cText, C2D_AlignCenter, 106);
-
-    /*
-     * Player art area.  The carousel remains the source of the artwork, so
-     * swiping/turning through tracks is unchanged.  Neon rings sit behind it
-     * rather than replacing the flow renderer.
-     */
-    const float asz = 140.0f, ax = 130.0f, ay = 38.0f;
-    bool use_flow = (S.display_mode == 0) && flow_appear > 0.01f && L.n > 0;
-
-    /* Broad green bloom. */
-    rrect(ax - 8, ay - 8, asz + 16, asz + 16, 15, 0.07f,
-          C2D_Color32(0, 60, 20, 115));
-    rrect(ax - 5, ay - 5, asz + 10, asz + 10, 13, 0.08f,
-          C2D_Color32(10, 180, 55, 150));
-    rrect(ax - 2, ay - 2, asz + 4, asz + 4, 11, 0.09f, cBright);
-    rrect(ax, ay, asz, asz, 9, 0.10f, cBlack);
+    /* ---- cover area: a lit frame, the cover flow / visualizer inside ---- */
+    neon_box(ART_X - 4, ART_Y - 4, ART_SZ + 8, ART_SZ + 8, 11, 0.07f, cAcc, cGlow, cBg);
 
     if (!use_flow && S.display_mode != 0) {
-        draw_visualizer(ax + 3, ay + 3, asz - 6);
+        draw_visualizer(ART_X + 3, ART_Y + 3, ART_SZ - 6);
     } else if (use_flow) {
         FlowItem items[10];
         const int base = (int)floorf(flow_pos) - 4;
@@ -1240,13 +1325,13 @@ static void draw_top(void)
             Entry *e = &L.e[idx];
             items[i].kind = e->is_dir ? 1 : 2;
             items[i].color = e->is_dir
-                ? C(mix_rgb(neon_dim, white, 55))
-                : C(mix_rgb(black, tile_color(e->name), 90));
+                ? C(mix_rgb(mix_rgb(S.bg, S.accent, 100), S.text, 55))
+                : C(mix_rgb(S.bg, tile_color(e->name), 90));
             items[i].fade = 1.0f;
 
             if (playing_view && idx == ci && art_ready()) {
                 items[i].tex = art_image()->tex;
-                items[i].color = C(neon);
+                items[i].color = cAcc;
                 float f = art_fade;
                 items[i].fade = f * f * (3.0f - 2.0f * f);
             } else if (is_current_row(idx) && art_ready()) {
@@ -1258,200 +1343,206 @@ static void draw_top(void)
             if (playing_view && idx == ci && !items[i].tex) items[i].kind = 0;
         }
 
-        /* Preserve the existing 3D-style cover carousel. */
+        /* the 3D-style cover carousel, unchanged */
         flow_draw(items, 10, base, flow_pos, flow_appear, top_bg_color);
     } else if (art_ready()) {
-        C2D_DrawImageAt(*art_image(), ax + 2, ay + 2, 0.40f, NULL,
-                        (asz - 4) / 128.0f, (asz - 4) / 128.0f);
+        C2D_DrawImageAt(*art_image(), ART_X, ART_Y, 0.40f, NULL, ART_SZ / 128.0f, ART_SZ / 128.0f);
         if (art_fade < 0.999f) {
-            C2D_DrawRectSolid(ax + 2, ay + 2, 0.41f, asz - 4, asz - 4,
-                              C2D_Color32(0, 0, 0,
-                              (u8)(255.0f * (1.0f - art_fade))));
+            C2D_DrawRectSolid(ART_X, ART_Y, 0.41f, ART_SZ, ART_SZ,
+                              C2D_Color32(S.bg.r, S.bg.g, S.bg.b, (u8)(255.0f * (1.0f - art_fade))));
         }
     } else {
-        icon_note(ax + asz / 2 - 7, ay + asz / 2 - 8, cText);
+        icon_note(ART_X + ART_SZ / 2 - 7, ART_Y + ART_SZ / 2 - 8, cText);
     }
 
-    /* Title area: deliberately high contrast like the reference. */
+    /* ---- song panel: the same look as a highlighted row on the bottom screen ---- */
+    const float py = 178, ph = 34, pcy = py + ph / 2;
+    neon_box(24, py, 352, ph, 12, 0.08f, cAcc, cGlow, cRowSel);
+    neon_disc(46, pcy, 11, 0.10f, cAcc, cGlow, cFill);
+    if (playing)         icon_eq(41.5f, pcy - 5, 9, 10, true, cAcc);
+    else if (track_loaded) icon_pause(46, pcy, 4.5f, cAcc);
+    else                 icon_small_note(39.5f, pcy - 8, cAcc);
+
+    const char *title = "Nothing playing", *sub = "Pick a song to start";
     if (track_loaded) {
-        draw_text_sh(cur.title[0] ? cur.title : "Song",
-                     200, 181, 0.72f, cText, C2D_AlignCenter, 300);
-        if (cur.artist[0])
-            draw_text(cur.artist, 200, 199, 0.34f, cDim,
-                      C2D_AlignCenter, 240);
+        title = cur.title[0] ? cur.title : base_name(cur_path);
+        sub = cur.artist;
     } else if (use_flow && L.n > 0) {
         int fi = (int)floorf(flow_pos + 0.5f);
         if (fi < 0) fi = 0;
         if (fi >= L.n) fi = L.n - 1;
         Entry *e = &L.e[fi];
-        draw_text_sh(e->is_dir
-                     ? (!strcmp(e->name, "..") ? "Back" : e->name)
-                     : (e->title[0] ? e->title : base_name(e->name)),
-                     200, 181, 0.72f, cText, C2D_AlignCenter, 300);
-    } else {
-        draw_text_sh("Song", 200, 181, 0.72f, cText,
-                     C2D_AlignCenter, 300);
+        title = e->is_dir ? (!strcmp(e->name, "..") ? "Back" : e->name)
+                          : (e->title[0] ? e->title : base_name(e->name));
+        sub = e->is_dir ? "Folder" : e->artist;
+    }
+    draw_text(title, 66, py + 1, 0.60f, cAcc, C2D_AlignLeft, track_loaded ? 262 : 292);
+    if (sub[0]) draw_text(sub, 66, py + 20, 0.34f, cText, C2D_AlignLeft, 262);
+    if (track_loaded) {
+        if (track_is_favorite()) icon_heart(357, pcy, 6.0f, cAcc);
+        else icon_heart_line(357, pcy, 6.0f, cDim, cRowSel);
     }
 
-    /* Neon seek bar.  Keep the same touch/input coordinates. */
+    /* ---- seek bar ---- */
     u32 pos = track_loaded ? audio_position_ms() : 0;
     u32 dur = track_loaded ? cur.duration_ms : 0;
     float frac = progress_frac(pos, dur);
+    const float bx0 = 66.0f, bw = 268.0f, by = 227.0f;
+    char tb[24];
 
-    const float px0 = 94.0f, pw = 212.0f, py = 214.0f;
-
-    rrect(px0 - 2, py - 4, pw + 4, 10, 5, 0.06f,
-          C2D_Color32(5, 92, 31, 120));
-    rrect(px0, py - 3, pw, 8, 4, 0.08f, cDim);
-
-    float fw = pw * frac;
-    if (fw < 5) fw = 5;
-    rrect(px0, py - 3, fw, 8, 4, 0.09f, cBright);
-
-    float kx = px0 + pw * frac;
-    C2D_DrawCircleSolid(kx, py + 1, 0.10f, 12.0f, C2D_Color32(0, 80, 28, 130));
-    C2D_DrawCircleSolid(kx, py + 1, 0.12f, 8.5f, cNeon);
-    C2D_DrawCircleSolid(kx, py + 1, 0.13f, 5.0f, cBlack);
-
-    draw_status_bar();
+    if (track_loaded) {
+        fmt_time(tb, sizeof tb, pos);
+        row_text(tb, 26, by - 7, 14, 0.34f, cDim, C2D_AlignLeft, 38);
+        fmt_time(tb, sizeof tb, dur);
+        row_text(tb, 374, by - 7, 14, 0.34f, cDim, C2D_AlignRight, 38);
+    }
+    rrect(bx0 - 2, by - 5, bw + 4, 10, 5, 0.06f, cGlow);
+    rrect(bx0, by - 3, bw, 6, 3, 0.08f, cTrk);
+    float fw = bw * frac; if (fw < 6) fw = 6;
+    rrect(bx0, by - 3, fw, 6, 3, 0.09f, cAcc);
+    float kx = bx0 + bw * frac;
+    C2D_DrawCircleSolid(kx, by, 0.12f, 7.0f, cGlow);
+    C2D_DrawCircleSolid(kx, by, 0.13f, 5.4f, cAcc);
+    C2D_DrawCircleSolid(kx, by, 0.14f, 2.6f, cBg);
 }
 
 /* ====================================================================== bottom-screen UI
+ * Layout (320 x 240):   header 5..31 | tabs 36..60 | song list 66..190 | deck 194..236
  * Layering (citro2d depth: higher z = in front, equal z = draw order, text is always z 0.5):
- *   0.05 gradient   0.08 wallpaper   0.10 frame   0.20 panels   0.22 panel insets
- *   0.30 widgets    0.45 icons       0.46 toast
+ *   0.10 frame   0.12 wallpaper   0.20 panels / rims / insets   0.22 buttons   0.26 press flash
+ *   0.30 widgets   0.45 icons   0.46 toast
  */
-static void icon_heart(float cx, float cy, float s, u32 c)
+static void draw_frame(void)                  /* neon outline + dark fill for the whole bottom screen */
 {
-    C2D_DrawCircleSolid(cx - s * 0.5f, cy - s * 0.3f, 0.45f, s * 0.56f, c);
-    C2D_DrawCircleSolid(cx + s * 0.5f, cy - s * 0.3f, 0.45f, s * 0.56f, c);
-    C2D_DrawTriangle(cx - s * 1.02f, cy - s * 0.12f, c, cx + s * 1.02f, cy - s * 0.12f, c, cx, cy + s * 0.95f, c, 0.45f);
+    neon_frame(BOT_W, SCR_H, 0.10f);
 }
 
-static void icon_home(float cx, float cy, u32 c, u32 door)
-{
-    C2D_DrawTriangle(cx - 8, cy - 0.5f, c, cx + 8, cy - 0.5f, c, cx, cy - 8, c, 0.45f);
-    C2D_DrawRectSolid(cx - 5, cy - 0.5f, 0.45f, 10, 7.5f, c);
-    C2D_DrawRectSolid(cx - 1.5f, cy + 2.5f, 0.46f, 3, 4.5f, door);
-}
-
-static void icon_queue(float cx, float cy, u32 c)
-{
-    C2D_DrawRectSolid(cx - 8, cy - 6, 0.45f, 16, 2, c);
-    C2D_DrawRectSolid(cx - 8, cy - 1, 0.45f, 16, 2, c);
-    C2D_DrawRectSolid(cx - 8, cy + 4, 0.45f, 8, 2, c);
-    C2D_DrawTriangle(cx + 2, cy + 2.5f, c, cx + 2, cy + 8.5f, c, cx + 8, cy + 5.5f, c, 0.45f);
-}
-
-static void icon_small_note(float x, float y, u32 c)      /* ~13x16 note, top-left at x,y */
-{
-    C2D_DrawCircleSolid(x + 4.5f, y + 12, 0.45f, 3.0f, c);
-    C2D_DrawRectSolid(x + 6.5f, y + 2, 0.45f, 2, 10, c);
-    C2D_DrawTriangle(x + 8.5f, y + 2, c, x + 12.5f, y + 6.5f, c, x + 8.5f, y + 8, c, 0.45f);
-}
-
-static void draw_frame(void)                  /* thin neon outline around the whole bottom screen */
-{
-    u32 c = C(mix_rgb(S.bg, S.accent, 130));
-    C2D_DrawRectSolid(2, 2, 0.10f, 316, 1.5f, c);
-    C2D_DrawRectSolid(2, 236.5f, 0.10f, 316, 1.5f, c);
-    C2D_DrawRectSolid(2, 2, 0.10f, 1.5f, 236, c);
-    C2D_DrawRectSolid(316.5f, 2, 0.10f, 1.5f, 236, c);
-}
-
-static void draw_toast(void)                  /* short status pill just above the transport deck */
+static void draw_toast(void)                  /* short status pill just above the deck */
 {
     if (toast_t <= 0) return;
-    rrect(70, 142, 180, 20, 10, 0.46f, C(S.accent));
-    row_text(toast_msg, 160, 142, 20, 0.42f, C(S.bg), C2D_AlignCenter, 168);
+    rrect(70, 166, 180, 20, 10, 0.46f, C(S.accent));
+    row_text(toast_msg, 160, 166, 20, 0.42f, C(S.bg), C2D_AlignCenter, 168);
 }
 
-static void draw_miniplayer(void)
+/* Now Playing | shuffle - prev - play/pause - next - repeat | volume.  Touch zones: handle_ctrl_tap. */
+static void draw_deck(void)
 {
     u32 cText = C(S.text), cAcc = C(S.accent), cBg = C(S.bg);
     u32 cDim  = C(mix_rgb(S.text, S.bg, 120));
-    u32 cCard = C(mix_rgb(S.bg, S.select, 150));
-    u32 cRing = C(mix_rgb(S.bg, S.accent, 130));
-    u32 cTrk  = C(mix_rgb(S.bg, S.select, 255));
-    const float y = CTRL_TOP;
-    char buf[24];
+    u32 cGlow = neon_glow();
+    u32 cFill = C(mix_rgb(S.bg, S.accent, 8));
+    u32 cTrk  = C(mix_rgb(S.bg, S.accent, 75));
+    u32 cPale = C(mix_rgb(S.accent, S.text, 90));      /* prev / next */
+    u32 cOff  = C(mix_rgb(S.accent, S.bg, 130));       /* shuffle / repeat when off */
+    const float y = CTRL_TOP, h = 42, cy = y + h / 2;
+    const bool playing = audio_is_active() && !audio_is_paused();
+    char buf[32];
 
-    rrect(6, y, 308, 68, 13, 0.20f, cRing);
-    rrect(7.5f, y + 1.5f, 305, 65, 12, 0.22f, cCard);
-
-    /* seek bar with elapsed / total time */
+    /* --- Now Playing capsule: label, title, seek line --- */
     u32 pos = track_loaded ? audio_position_ms() : 0;
     u32 dur = track_loaded ? cur.duration_ms : 0;
     float frac = slider_drag ? slider_frac : progress_frac(pos, dur);
-    const float tw = SL_X1 - SL_X0, ty = y + 12;
-    fmt_time(buf, sizeof buf, slider_drag ? (u32)(slider_frac * (float)dur) : pos);
-    row_text(buf, 14, y + 5, 14, 0.34f, cDim, C2D_AlignLeft, 34);
-    fmt_time(buf, sizeof buf, dur);
-    row_text(buf, 281, y + 5, 14, 0.34f, cDim, C2D_AlignLeft, 34);
-    rrect(SL_X0, ty - 2.5f, tw, 5, 2.5f, 0.30f, cTrk);
-    float fw = tw * frac; if (fw < 5) fw = 5;
-    rrect(SL_X0, ty - 2.5f, fw, 5, 2.5f, 0.32f, cAcc);
-    C2D_DrawCircleSolid(SL_X0 + tw * frac, ty, 0.36f, slider_drag ? 7.5f : 5.5f, cAcc);
-    C2D_DrawCircleSolid(SL_X0 + tw * frac, ty, 0.38f, slider_drag ? 3.0f : 2.0f, cBg);
-
-    /* what is playing */
-    const char *title = track_loaded ? (cur.title[0] ? cur.title : base_name(cur_path)) : "Nothing playing";
-    const char *sub   = track_loaded ? (cur.artist[0] ? cur.artist : (audio_is_paused() ? "Paused" : "Now playing"))
-                                     : "Pick a song to start";
-    draw_text(title, 14, y + 27, 0.46f, track_loaded ? cAcc : cText, C2D_AlignLeft, 112);
-    draw_text(sub,   14, y + 43, 0.32f, cDim, C2D_AlignLeft, 112);
-
-    /* transport (tap zones: see handle_ctrl_tap) */
-    const float cy = y + 44;
-    if (ctrl_flash_t > 0) C2D_DrawCircleSolid(ctrl_flash_x, cy, 0.26f, 17, C(mix_rgb(S.select, S.accent, 90)));
-    icon_shuffle(142, cy, 7, S.shuffle ? cAcc : cDim);
-    icon_prev(168, cy, 8, cText);
-    C2D_DrawCircleSolid(200, cy, 0.30f, 16, cAcc);
-    if (audio_is_active() && !audio_is_paused()) icon_pause(200, cy, 8, cBg); else icon_play(200, cy, 8, cBg);
-    icon_next(232, cy, 8, cText);
-    icon_repeat(260, cy, 7, S.repeat ? cAcc : cDim);
-    icon_queue(292, cy, queue_open ? cAcc : cText);
-    if (manual_queue_count > 0) {
-        C2D_DrawCircleSolid(302, cy - 9, 0.46f, 6.5f, cAcc);
-        snprintf(buf, sizeof buf, "%d", manual_queue_count);
-        row_text(buf, 302, cy - 15.5f, 13, 0.30f, cBg, C2D_AlignCenter, 0);
+    neon_box(6, y, 114, h, 13, 0.20f, cAcc, cGlow, cFill);
+    icon_eq(15, y + 8, 14, 16, playing, cAcc);
+    if (slider_drag) {
+        char a[16], b[16];
+        fmt_time(a, sizeof a, (u32)(slider_frac * (float)dur));
+        fmt_time(b, sizeof b, dur);
+        snprintf(buf, sizeof buf, "%s / %s", a, b);
+    } else {
+        snprintf(buf, sizeof buf, "Now Playing:");
     }
+    draw_text(buf, 36, y + 4, 0.28f, cDim, C2D_AlignLeft, 78);
+    const char *title = track_loaded ? (cur.title[0] ? cur.title : base_name(cur_path)) : "Not playing";
+    draw_text(title, 36, y + 13, 0.44f, track_loaded ? cAcc : cText, C2D_AlignLeft, 78);
+
+    const float tw = SL_X1 - SL_X0, ty = y + 33;
+    rrect(SL_X0, ty - 2, tw, 4, 2, 0.30f, cTrk);
+    float fw = tw * frac; if (fw < 4) fw = 4;
+    rrect(SL_X0, ty - 2, fw, 4, 2, 0.32f, cAcc);
+    if (track_loaded) C2D_DrawCircleSolid(SL_X0 + tw * frac, ty, 0.36f, slider_drag ? 5.0f : 3.6f, cAcc);
+
+    /* --- transport capsule --- */
+    neon_box(123, y, 117, h, 21, 0.20f, cAcc, cGlow, cFill);
+    neon_disc(182, cy, 14, 0.22f, cAcc, cGlow, cFill);
+    if (ctrl_flash_t > 0) C2D_DrawCircleSolid(ctrl_flash_x, cy, 0.26f, 14, C(mix_rgb(S.bg, S.accent, 90)));
+    icon_shuffle(137, cy, 6, S.shuffle ? cAcc : cOff);
+    icon_prev(156, cy, 6, cPale);
+    if (playing) icon_pause(182, cy, 7, cAcc); else icon_play(183.5f, cy, 7, cAcc);
+    icon_next(208, cy, 6, cPale);
+    icon_repeat(227, cy, 6, S.repeat ? cAcc : cOff);
+    if (S.repeat == 2) {                                     /* repeat-one: small "1" badge */
+        C2D_DrawCircleSolid(233.5f, cy - 8, 0.46f, 4.5f, cAcc);
+        row_text("1", 233.5f, cy - 12.5f, 9, 0.28f, cBg, C2D_AlignCenter, 0);
+    }
+
+    /* --- volume capsule --- */
+    neon_box(243, y, 71, h, 21, 0.20f, cAcc, cGlow, cFill);
+    icon_speaker(254, cy, vol_pct > 0, cAcc);
+    const float vw = VOL_X1 - VOL_X0, vf = (float)vol_pct / 100.0f;
+    rrect(VOL_X0, cy - 3, vw, 6, 3, 0.30f, cTrk);
+    if (vol_pct > 0) rrect(VOL_X0, cy - 3, vw * vf < 6 ? 6 : vw * vf, 6, 3, 0.32f, cAcc);
+    C2D_DrawCircleSolid(VOL_X0 + vw * vf, cy, 0.36f, vol_drag ? 6.0f : 4.6f, cAcc);
+    C2D_DrawCircleSolid(VOL_X0 + vw * vf, cy, 0.38f, 2.0f, cBg);
 }
 
 static void draw_browser(void)
 {
     u32 cText = C(S.text), cAcc = C(S.accent), cBg = C(S.bg);
     u32 cDim  = C(mix_rgb(S.text, S.bg, 120));
-    u32 cCard = C(mix_rgb(S.bg, S.select, 150));
-    u32 cRing = C(mix_rgb(S.bg, S.accent, 130));
-    u32 cRow  = C(mix_rgb(S.bg, S.select, 80));
-    u32 cRowSel = C(mix_rgb(S.bg, S.accent, 45));
+    u32 cGlow = neon_glow();
+    u32 cFill = C(mix_rgb(S.bg, S.accent, 8));
+    u32 cRowSel  = C(mix_rgb(S.bg, S.accent, 38));          /* highlighted row: dark green */
+    u32 cRowFill = C(mix_rgb(S.bg, S.text, 10));            /* other rows: dark grey */
+    u32 cGrey    = C(mix_rgb(S.bg, S.text, 42));            /* grey rim */
+    u32 cGreyGl  = C(mix_rgb(S.bg, S.text, 14));
+    u32 cHeart   = C(mix_rgb(S.text, S.bg, 70));
+    char buf[32];
 
-    /* header: home button + search pill */
-    C2D_DrawCircleSolid(21, 21, 0.20f, 13, cRing);
-    C2D_DrawCircleSolid(21, 21, 0.22f, 11.8f, cCard);
-    icon_home(21, 21, cAcc, cCard);
-    rrect(40, 8, 272, 26, 13, 0.20f, cRing);
-    rrect(41.2f, 9.2f, 269.6f, 23.6f, 11.8f, 0.22f, cCard);
-    icon_search(55, 21, cDim, cCard);
+    /* ---- header: home | search | liked songs ---- */
+    neon_disc(20, 18, 14, 0.20f, cAcc, cGlow, cFill);
+    icon_home(20, 18, cAcc, cFill);
+
+    neon_box(38, 5, 170, 26, 13, 0.20f, cAcc, cGlow, cFill);
+    icon_search(54, 18, cDim, cFill);
     if (L_is_search) {
-        row_text(search_q, 69, 8, 26, 0.42f, cText, C2D_AlignLeft, 205);
-        C2D_DrawLine(293, 16, cDim, 303, 26, cDim, 1.8f, 0.45f);
-        C2D_DrawLine(303, 16, cDim, 293, 26, cDim, 1.8f, 0.45f);
+        row_text(search_q, 68, 5, 26, 0.42f, cText, C2D_AlignLeft, 118);
+        C2D_DrawLine(192, 13, cDim, 202, 23, cDim, 1.8f, 0.45f);
+        C2D_DrawLine(202, 13, cDim, 192, 23, cDim, 1.8f, 0.45f);
     } else {
-        row_text("Search music", 69, 8, 26, 0.42f, cDim, C2D_AlignLeft, 205);
+        row_text("Search Music...", 68, 5, 26, 0.42f, cDim, C2D_AlignLeft, 130);
     }
 
-    /* tabs: All Songs | Liked */
-    rrect(8, 38, 304, 22, 11, 0.20f, cCard);
-    char liked[24];
-    snprintf(liked, sizeof liked, "Liked  %d", favorite_count);
-    bool fav_tab = L_is_favorites;
-    rrect(fav_tab ? 162 : 10, 40, 148, 18, 9, 0.24f, cAcc);
-    row_text("All Songs", 84,  40, 18, 0.40f, fav_tab ? cDim : cBg, C2D_AlignCenter, 140);
-    row_text(liked,       236, 40, 18, 0.40f, fav_tab ? cBg : cDim, C2D_AlignCenter, 140);
+    neon_box(212, 5, 100, 26, 13, 0.20f, L_is_favorites ? cAcc : cGrey, L_is_favorites ? cGlow : cGreyGl,
+             L_is_favorites ? cRowSel : cFill);
+    icon_heart(228, 18, 5.2f, cAcc);
+    row_text("Liked Songs", 240, 5, 26, 0.36f, cText, C2D_AlignLeft, 68);
 
-    /* song list */
+    /* ---- tabs: All Songs | Liked Songs | Playlists (Playlists opens Up Next) ---- */
+    static const char *TABS[3] = { "All Songs", "Liked Songs", "Playlists" };
+    for (int t = 0; t < 3; t++) {
+        const float x = 8.0f + t * 103.0f, ty = 36, tw = 98, th = 24;
+        bool on = (t == 0 && !L_is_favorites) || (t == 1 && L_is_favorites);
+        u32 ic = on ? cBg : cDim;
+        if (on) {
+            rrect(x - 1.5f, ty - 1.5f, tw + 3, th + 3, 13.5f, 0.20f, cGlow);
+            rrect(x, ty, tw, th, 12, 0.222f, cAcc);
+        } else {
+            neon_box(x, ty, tw, th, 12, 0.20f, cGrey, cGreyGl, cFill);
+        }
+        if (t == 0) icon_small_note(x + 9, ty + 4, ic);
+        else if (t == 1) { if (on) icon_heart(x + 16, ty + 11.5f, 5.0f, ic); else icon_heart_line(x + 16, ty + 11.5f, 5.0f, ic, cFill); }
+        else icon_list(x + 16, ty + 12, ic);
+        row_text(TABS[t], x + 58, ty, th, 0.38f, on ? cBg : cDim, C2D_AlignCenter, 66);
+    }
+    if (manual_queue_count > 0) {                           /* badge: songs waiting in Up Next */
+        C2D_DrawCircleSolid(8 + 2 * 103 + 92, 38, 0.46f, 6.5f, cAcc);
+        snprintf(buf, sizeof buf, "%d", manual_queue_count);
+        row_text(buf, 8 + 2 * 103 + 92, 31.5f, 13, 0.30f, cBg, C2D_AlignCenter, 0);
+    }
+
+    /* ---- song list ---- */
+    const float RX = 8, RW = 290, RH = ROW_H - 3;
     int loads_this_frame = 0;
     for (int i = 0; i < VIS_ROWS; i++) {
         int idx = scroll_top + i;
@@ -1461,60 +1552,81 @@ static void draw_browser(void)
         bool cur_row = is_current_row(idx);
         bool playing = cur_row && audio_is_active() && !audio_is_paused();
         bool selected = (idx == sel);
+        u32 rowfill = selected ? cRowSel : cRowFill;
 
-        if (selected) {
-            rrect(8, y, 298, 23, 7, 0.20f, cAcc);
-            rrect(9.2f, y + 1.2f, 295.6f, 20.6f, 6, 0.22f, cRowSel);
-        } else {
-            rrect(8, y, 298, 23, 7, 0.20f, cRow);
+        if (selected) neon_box(RX, y, RW, RH, 9, 0.20f, cAcc, cGlow, cRowSel);
+        else          neon_box(RX, y, RW, RH, 9, 0.20f, cGrey, cGreyGl, cRowFill);
+
+        /* cover thumbnail (or a tile while it is still loading / for folders) */
+        const float tx = RX + 5, tyy = y + 3, ts = 22;
+        C3D_Tex *tex = NULL;
+        if (!e->is_dir) {
+            if (cur_row && art_ready()) tex = art_image()->tex;
+            else { float fd; tex = flow_tex(idx, &fd); }
         }
-
-        const float tx = 12, tyy = y + 3;
-        Rgb tc = e->is_dir ? mix_rgb(S.select, S.text, 60) : tile_color(e->name);
-        rrect(tx, tyy, 17, 17, 5, 0.30f, C(tc));
-        if (e->is_dir) {
-            C2D_DrawRectSolid(tx + 3, tyy + 4, 0.45f, 5, 2.5f, cText);
-            C2D_DrawRectSolid(tx + 3, tyy + 6, 0.45f, 11, 7, cText);
-        } else if (playing) {
+        if (tex) {
+            draw_thumb(tex, tx, tyy, ts, 0.30f);
+        } else {
+            Rgb tc = e->is_dir ? mix_rgb(S.select, S.text, 60) : tile_color(e->name);
+            rrect(tx, tyy, ts, ts, 5, 0.30f, C(tc));
+            if (e->is_dir) {
+                C2D_DrawRectSolid(tx + 4, tyy + 6, 0.45f, 6, 3, cText);
+                C2D_DrawRectSolid(tx + 4, tyy + 8, 0.45f, 14, 9, cText);
+            } else if (!playing) {
+                icon_small_note(tx + 4.5f, tyy + 3, cText);
+            }
+        }
+        if (playing) {                                      /* animated bars over the thumbnail */
+            if (tex) C2D_DrawRectSolid(tx, tyy + 13, 0.42f, ts, 9, C2D_Color32(0, 0, 0, 170));
             for (int k = 0; k < 3; k++) {
-                float h = 3.0f + 8.0f * (0.5f + 0.5f * sinf(eq_phase * 2.0f + k * 1.7f));
-                C2D_DrawRectSolid(tx + 3.5f + k * 4, tyy + 14 - h, 0.45f, 3, h, cAcc);
+                float hb = 3.0f + 8.0f * (0.5f + 0.5f * sinf(eq_phase * 2.0f + k * 1.7f));
+                C2D_DrawRectSolid(tx + 5 + k * 5, tyy + 20 - hb, 0.45f, 3, hb, cAcc);
             }
-        } else {
-            icon_small_note(tx + 2, tyy + 0.5f, cText);
         }
 
-        const float lx = 36;
+        const float lx = RX + 34;
         if (e->is_dir) {
-            row_text(!strcmp(e->name, "..") ? "Back" : e->name, lx, y, 23, 0.46f, selected ? cAcc : cText, C2D_AlignLeft, 250);
-        } else {
-            if (!e->meta_loaded && loads_this_frame < 1 && flow_idle > 2) { ensure_meta(e); loads_this_frame++; }
-            const char *name = (e->meta_loaded && e->title[0]) ? e->title : base_name(e->name);
-            u32 tcol = cur_row ? cAcc : cText;
-            if (e->meta_loaded && e->artist[0]) {
-                draw_text(name, lx, y + 0.5f, 0.42f, tcol, C2D_AlignLeft, 235);
-                draw_text(e->artist, lx, y + 12.5f, 0.28f, cDim, C2D_AlignLeft, 235);
-            } else {
-                row_text(name, lx, y, 23, 0.44f, tcol, C2D_AlignLeft, 235);
-            }
-            char favpath[256]; entry_relative_path(e, favpath, sizeof favpath);
-            icon_heart(293, y + 11, 4.6f, is_favorite(favpath) ? cAcc : C(mix_rgb(S.bg, S.text, 70)));
+            row_text(!strcmp(e->name, "..") ? "Back" : e->name, lx, y, RH, 0.46f, selected ? cAcc : cText, C2D_AlignLeft, 245);
+            continue;
         }
+        if (!e->meta_loaded && loads_this_frame < 1 && flow_idle > 2) { ensure_meta(e); loads_this_frame++; }
+        const char *name = (e->meta_loaded && e->title[0]) ? e->title : base_name(e->name);
+        u32 tcol = (selected || cur_row) ? cAcc : cText;
+        if (e->meta_loaded && e->artist[0]) {
+            draw_text(name, lx, y + 1, 0.44f, tcol, C2D_AlignLeft, 190);
+            draw_text(e->artist, lx, y + 15, 0.28f, cDim, C2D_AlignLeft, 190);
+        } else {
+            row_text(name, lx, y, RH, 0.44f, tcol, C2D_AlignLeft, 190);
+        }
+        u32 dms = (cur_row && track_loaded && cur.duration_ms) ? cur.duration_ms : e->duration_ms;
+        if (dms) {
+            fmt_time(buf, sizeof buf, dms);
+            row_text(buf, 268, y, RH, 0.38f, cText, C2D_AlignRight, 36);
+        }
+        char favpath[256]; entry_relative_path(e, favpath, sizeof favpath);
+        if (is_favorite(favpath)) icon_heart(285, y + RH / 2, 5.2f, cAcc);
+        else                      icon_heart_line(285, y + RH / 2, 5.2f, cHeart, rowfill);
     }
 
     if (L.n == 0) {
-        draw_text(L_is_favorites ? "No liked songs yet" : "No songs here", 160, 92, 0.55f, cText, C2D_AlignCenter, 290);
-        draw_text(L_is_favorites ? "Tap a heart on any song to add it" : "Copy music to SD:/Music/", 160, 116, 0.38f, cDim, C2D_AlignCenter, 290);
-    }
-    if (L.n > VIS_ROWS) {
-        float track_h = VIS_ROWS * ROW_H - 2;
-        float th = track_h * VIS_ROWS / L.n; if (th < 10) th = 10;
-        float ty2 = LIST_TOP + (track_h - th) * scroll_top / (L.n - VIS_ROWS);
-        rrect(309, LIST_TOP, 3, track_h, 1.5f, 0.20f, cRow);
-        rrect(309, ty2, 3, th, 1.5f, 0.30f, cAcc);
+        draw_text(L_is_favorites ? "No liked songs yet" : "No songs here", 160, 100, 0.55f, cText, C2D_AlignCenter, 290);
+        draw_text(L_is_favorites ? "Tap a heart on any song to add it" : "Copy music to SD:/Music/", 160, 124, 0.38f, cDim, C2D_AlignCenter, 290);
     }
 
-    draw_miniplayer();
+    /* ---- scrollbar: arrows (tap) + thumb ---- */
+    const float sbx = 303, sbw = 12, sbh = VIS_ROWS * ROW_H - 3;
+    neon_box(sbx, LIST_TOP, sbw, sbh, 6, 0.20f, cGrey, cGreyGl, cRowFill);
+    C2D_DrawTriangle(sbx + 3, LIST_TOP + 11, cAcc, sbx + sbw - 3, LIST_TOP + 11, cAcc, sbx + sbw / 2, LIST_TOP + 5, cAcc, 0.45f);
+    C2D_DrawTriangle(sbx + 3, LIST_TOP + sbh - 11, cAcc, sbx + sbw - 3, LIST_TOP + sbh - 11, cAcc, sbx + sbw / 2, LIST_TOP + sbh - 5, cAcc, 0.45f);
+    {
+        const float y0 = LIST_TOP + 15, rng = sbh - 30;
+        float th = (L.n > VIS_ROWS) ? rng * VIS_ROWS / (float)L.n : rng;
+        if (th < 12) th = 12;
+        float thy = y0 + ((L.n > VIS_ROWS) ? (rng - th) * (float)scroll_top / (float)(L.n - VIS_ROWS) : 0.0f);
+        rrect(sbx + 3, thy, sbw - 6, th, 3, 0.30f, cAcc);
+    }
+
+    draw_deck();
 }
 
 /* ------------------------------------------------------- first-run setup */
@@ -1604,24 +1716,24 @@ static const char *UI_CLOCK_NAMES[3]     = { "Off", "12-hour", "24-hour" };
 static void draw_wallpaper_accents(float w, float h)
 {
     if (S.wallpaper <= 0 || S.wallpaper > 4) return;
-    const float z = 0.08f;
+    const float z = 0.12f, m = 4.0f;                              /* stay inside the neon frame */
     u32 c  = C(mix_rgb(S.bg, S.accent, 22));
     u32 c2 = C(mix_rgb(S.bg, S.accent, 34));
     switch (S.wallpaper) {
     case 1:                                                       /* scanlines */
-        for (float y = 3; y < h; y += 6) C2D_DrawRectSolid(0, y, z, w, 1, c);
+        for (float y = 5; y < h - m; y += 6) C2D_DrawRectSolid(m, y, z, w - 2 * m, 1, c);
         break;
     case 2:                                                       /* dot grid */
-        for (float y = 8; y < h; y += 16)
-            for (float x = 8; x < w; x += 16) C2D_DrawRectSolid(x, y, z, 2, 2, c2);
+        for (float y = 8; y < h - m; y += 16)
+            for (float x = 8; x < w - m; x += 16) C2D_DrawRectSolid(x, y, z, 2, 2, c2);
         break;
     case 3:                                                       /* corner glows */
-        C2D_DrawTriangle(0, 0, c2, 90, 0, c, 0, 90, c, z);
-        C2D_DrawTriangle(w, h, c2, w - 90, h, c, w, h - 90, c, z);
+        C2D_DrawTriangle(m, m, c2, 90, m, c, m, 90, c, z);
+        C2D_DrawTriangle(w - m, h - m, c2, w - 90, h - m, c, w - m, h - 90, c, z);
         break;
     case 4:                                                       /* grid */
-        for (float x = 0; x < w; x += 40) C2D_DrawRectSolid(x, 0, z, 1, h, c);
-        for (float y = 0; y < h; y += 40) C2D_DrawRectSolid(0, y, z, w, 1, c);
+        for (float x = 40; x < w - m; x += 40) C2D_DrawRectSolid(x, m, z, 1, h - 2 * m, c);
+        for (float y = 40; y < h - m; y += 40) C2D_DrawRectSolid(m, y, z, w - 2 * m, 1, c);
         break;
     }
 }
@@ -1806,7 +1918,7 @@ static void draw_settings(void)
 }
 
 /* ------------------------------------------------------------------ Up Next */
-#define QUEUE_ROWS 3                    /* rows 48..150 fit above the transport deck at CTRL_TOP */
+#define QUEUE_ROWS 4                    /* rows 48..184 fit above the deck at CTRL_TOP */
 static void draw_queue(void)
 {
     u32 cText = C(S.text), cAcc = C(S.accent), cSel = C(S.select), cBg = C(S.bg);
@@ -1860,14 +1972,15 @@ static void draw_queue(void)
             C2D_DrawLine(297, y + 12, cText, 289, y + 20, cText, 1.6f, 0.36f);
         }
         if (manual_queue_count > QUEUE_ROWS) {
-            float th = 102.0f * QUEUE_ROWS / manual_queue_count; if (th < 10) th = 10;
-            float ty = 48.0f + (102.0f - th) * queue_scroll / (manual_queue_count - QUEUE_ROWS);
-            rrect(311, 48, 3, 102, 1.5f, 0.30f, cSel);
+            const float qh = QUEUE_ROWS * 34.0f - 2.0f;
+            float th = qh * QUEUE_ROWS / manual_queue_count; if (th < 10) th = 10;
+            float ty = 48.0f + (qh - th) * queue_scroll / (manual_queue_count - QUEUE_ROWS);
+            rrect(311, 48, 3, qh, 1.5f, 0.30f, cSel);
             rrect(311, ty, 3, th, 1.5f, 0.34f, cAcc);
         }
     }
 
-    draw_miniplayer();
+    draw_deck();
 }
 
 static void draw_wizard_bottom(void)
@@ -1910,7 +2023,7 @@ static void draw_wizard_bottom(void)
             "Drag the list up / down to scroll",
             "Drag the seek bar to jump in a song",
             "Tap the search bar to find a song",
-            "Tap the queue button to open Up Next",
+            "Tap Playlists to open Up Next",
             "Settings: press SELECT; replay guide there"
         };
         for (int i = 0; i < 6; i++) {
@@ -2002,29 +2115,40 @@ static void skip_seconds(int secs)
     toast(msg);
 }
 
-static void handle_ctrl_tap(int px, int py)      /* bottom deck: seek, transport and Up Next */
+static void vol_apply(int px)                    /* volume bar: tap or drag */
 {
-    if (py < CTRL_TOP + 24) {
-        if (cur.duration_ms && track_loaded && px >= SL_X0 - 14 && px <= SL_X1 + 14) {
+    float f = (float)(px - VOL_X0) / (float)(VOL_X1 - VOL_X0);
+    if (f < 0.0f) f = 0.0f;
+    if (f > 1.0f) f = 1.0f;
+    vol_pct = (int)(f * 100.0f + 0.5f);
+    audio_set_volume(vol_pct);
+}
+
+static void handle_ctrl_tap(int px, int py)      /* bottom deck: seek line, transport and volume */
+{
+    if (px >= 243) { vol_drag = true; vol_apply(px); return; }                   /* volume capsule */
+    if (px < 123) {                                                              /* Now Playing capsule: seek line */
+        if (py >= CTRL_TOP + 24 && cur.duration_ms && track_loaded && px >= SL_X0 - 8 && px <= SL_X1 + 8) {
             slider_drag = true;
             slider_frac = frac_from_px(px);
         }
         return;
     }
-    if (px < 130)      return;                                                  /* title area */
-    if (px < 155)      { flash_ctrl(142); S.shuffle = !S.shuffle; mark_dirty(); }
-    else if (px < 184) skip_prev();
-    else if (px < 216) { flash_ctrl(200); toggle_play(); }
-    else if (px < 245) skip_next();
-    else if (px < 276) { flash_ctrl(260); S.repeat = (S.repeat + 1) % 3; mark_dirty(); }
-    else               { flash_ctrl(292); queue_open = !queue_open; queue_sel = 0; queue_scroll = 0; }
+    if (px < 147)      { flash_ctrl(137); S.shuffle = !S.shuffle; mark_dirty(); }
+    else if (px < 169) skip_prev();
+    else if (px < 195) { flash_ctrl(182); toggle_play(); }
+    else if (px < 217) skip_next();
+    else               { flash_ctrl(227); S.repeat = (S.repeat + 1) % 3; mark_dirty(); }
 }
 
-static void handle_header_tap(int px, int py)    /* home / search row and the All Songs | Liked tabs */
+static void open_up_next(void) { queue_open = true; queue_sel = 0; queue_scroll = 0; }
+
+static void handle_header_tap(int px, int py)    /* home / search / liked songs row and the three tabs */
 {
-    if (py >= 38) {                                                             /* tabs */
-        if (px < 160) { if (L_is_favorites || L_is_search) set_dir(S.last_dir, NULL); }
-        else if (!L_is_favorites) show_favorites();
+    if (py >= 34) {                                                             /* tabs: All Songs | Liked Songs | Playlists */
+        if (px < 108)      { if (L_is_favorites || L_is_search) set_dir(S.last_dir, NULL); }
+        else if (px < 211) { if (!L_is_favorites) show_favorites(); }
+        else               open_up_next();
         return;
     }
     if (px < 36) {                                                              /* home */
@@ -2032,7 +2156,11 @@ static void handle_header_tap(int px, int py)    /* home / search row and the Al
         else if (strcmp(L.dir, MUSIC_ROOT) != 0) set_dir(MUSIC_ROOT, NULL);
         return;
     }
-    if (L_is_search && px >= 284) exit_search();
+    if (px >= 212) {                                                            /* Liked Songs button: toggle the view */
+        if (L_is_favorites) set_dir(S.last_dir, NULL); else show_favorites();
+        return;
+    }
+    if (L_is_search && px >= 186) exit_search();
     else open_search();
 }
 
@@ -2335,7 +2463,19 @@ int main(void)
             }
             if ((ku & KEY_TOUCH) && touch_in_list && !dragging) {
                 int row = scroll_top + ((int)tp_start.py - LIST_TOP) / ROW_H;
-                if (row >= 0 && row < L.n && !L.e[row].is_dir && tp_start.px >= 278) { char fp[256]; entry_relative_path(&L.e[row], fp, sizeof fp); favorite_toggle(fp); }
+                if (tp_start.px >= SB_TAP_X) {                                   /* scrollbar: arrows move the list by a row */
+                    int dir = 0;
+                    if (tp_start.py < LIST_TOP + 22) dir = -1;
+                    else if (tp_start.py >= LIST_TOP + VIS_ROWS * ROW_H - 25) dir = +1;
+                    if (dir && L.n > 0) {
+                        scroll_top += dir;
+                        clamp_scroll();
+                        int mid = scroll_top + VIS_ROWS / 2;
+                        if (mid >= L.n) mid = L.n - 1;
+                        if (mid != sel) { sel = mid; flow_show = true; }
+                    }
+                }
+                else if (row >= 0 && row < L.n && !L.e[row].is_dir && tp_start.px >= 272) { char fp[256]; entry_relative_path(&L.e[row], fp, sizeof fp); favorite_toggle(fp); }
                 else activate(row);
             }
             if ((kh & KEY_TOUCH) && slider_drag) slider_frac = frac_from_px(tp.px);
@@ -2347,6 +2487,8 @@ int main(void)
                 hold_up = hold_down = hold_left = hold_right = -100000;   /* ignore keys still held until released */
             }
         }
+
+        if (vol_drag) { if (kh & KEY_TOUCH) vol_apply(tp.px); else vol_drag = false; }
 
         /* ---- auto-save theme/settings shortly after the last change ---- */
         if (settings_dirty && --dirty_timer <= 0) {
@@ -2375,8 +2517,8 @@ int main(void)
         C2D_TargetClear(bot, bg);
         C2D_SceneBegin(bot);
         bg_gradient(BOT_W);
-        draw_wallpaper_accents(BOT_W, SCR_H);
         draw_frame();
+        draw_wallpaper_accents(BOT_W, SCR_H);
         if (search_busy > 0) draw_search_busy();
         else if (confirm_exit) draw_exit_confirm();
         else if (wizard_open) draw_wizard_bottom();
