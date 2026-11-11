@@ -31,7 +31,7 @@ middle of the screen and fades smoothly between covers. Folders and covers witho
 colour. Turn it off, or pick *Soft* / *Vivid*, in Settings > Look > *Ambient glow*.
 
 **Bottom screen** - folder + music browser (starts in `SD:/Music/`) with a **search bar** and a
-**Favorites** heart in the header. The playing song is highlighted. Touch controls sit along the bottom:
+**Favorites** heart in the header. The playing song is highlighted; the browser uses compact CD glyphs instead of album-art thumbnails. Touch controls sit along the bottom:
 shuffle / previous / play-pause / next / repeat / Up Next. Shuffle and repeat light up with a dot underneath
 when on; repeat-one shows a small "1".
 

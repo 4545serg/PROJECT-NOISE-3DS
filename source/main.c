@@ -1445,7 +1445,7 @@ static void neon_ring(float w, float h, float z)
 }
 
 /* Spinning compact disc: a rim, a dark body, two sheen wedges that rotate with the music and a hub. */
-static void icon_cd(float cx, float cy, float r, float z)
+static void icon_cd(float cx, float cy, float r, float z, bool spin)
 {
     const u32 cAcc = C(th_acc), cGl = neon_glow();
     const u32 cBody = C(mix_rgb(th_bg, th_tx, 36));
@@ -1457,7 +1457,8 @@ static void icon_cd(float cx, float cy, float r, float z)
     C2D_DrawCircleSolid(cx, cy, z + 0.004f, r - 1.4f, cBody);
     for (int w = 0; w < 2; w++) {
         for (int i = 0; i < 3; i++) {
-            const float a0 = cd_phase + (float)w * 3.14159f + (float)i * 0.32f, a1 = a0 + 0.32f;
+            const float phase = spin ? cd_phase : 0.0f;
+            const float a0 = phase + (float)w * 3.14159f + (float)i * 0.32f, a1 = a0 + 0.32f;
             C2D_DrawTriangle(cx, cy, cMid, cx + cosf(a0) * rr, cy + sinf(a0) * rr, cLite,
                              cx + cosf(a1) * rr, cy + sinf(a1) * rr, cLite, z + 0.006f);
         }
@@ -2033,7 +2034,7 @@ static void draw_top(void)
     /* ---- song panel: the same look as a highlighted row on the bottom screen ---- */
     const float py = 176, ph = 40, pcy = py + ph / 2;
     neon_box(24, py, 352, ph, 12, 0.08f, cAcc, cGlow, cRowSel);
-    icon_cd(48, pcy, 14.0f, 0.10f);                          /* spins while the music plays */
+    icon_cd(48, pcy, 14.0f, 0.10f, true);                          /* spins while the music plays */
 
     const char *title = "Nothing playing", *sub = "Pick a song to start";
     if (track_loaded) {
@@ -2139,7 +2140,7 @@ static void draw_lyrics_top(void)
 
     /* ---- header: LYRICS | song - artist | state ---- */
     neon_box(8, 4, 384, 22, 11.0f, 0.08f, cAcc, cGlow, cFill);
-    icon_cd(24, 15, 7.5f, 0.10f);
+    icon_cd(24, 15, 7.5f, 0.10f, true);
     row_text("LYRICS", 38, 4, 22, 0.50f, cAcc, C2D_AlignLeft, 60);
     char hd[300];
     const char *title = cur.title[0] ? cur.title : base_name(cur_path);
@@ -2265,16 +2266,10 @@ static void draw_deck(void)
     u32 dur = track_loaded ? cur.duration_ms : 0;
     float frac = slider_drag ? slider_frac : progress_frac(pos, dur);
     neon_box(6, y, 114, h, 13, 0.20f, cAcc, cGlow, cFill);
-    if (art_ready()) {
-        const float cs = 34.0f;
-        /* Dedicated artwork slot: never replace real art with the CD glyph once the
-         * texture is ready, and keep the crop square and crisp at the native 3DS size. */
-        rrect(9.0f, y + 4.0f, cs + 4.0f, cs + 4.0f, 7.0f, 0.22f, cGlow);
-        C2D_DrawImageAt(*art_image(), 11.0f, y + 6.0f, 0.46f, NULL, cs / 128.0f, cs / 128.0f);
-    } else {
-        rrect(9.0f, y + 4.0f, 38.0f, 38.0f, 7.0f, 0.18f, cTrk);
-        icon_cd(28.0f, y + 23.0f, 10.0f, 0.45f);
-    }
+    /* The bottom mini-player is deliberately artwork-free. Use the same CD language
+     * as the transport instead, while the full album artwork remains on the top screen. */
+    rrect(9.0f, y + 4.0f, 38.0f, 38.0f, 7.0f, 0.18f, cTrk);
+    icon_cd(28.0f, y + 23.0f, 10.5f, playing ? 0.56f : 0.40f, true);
     char sub[48];
     if (slider_drag) {
         char a[16], b[16];
@@ -2392,31 +2387,18 @@ static void draw_browser(void)
         if (selected) neon_box(RX, y, RW, RH, 11, 0.20f, cAcc, cGlow, cRowSel);
         else          neon_box(RX, y, RW, RH, 11, 0.20f, cGrey, cGreyGl, cRowFill);
 
-        /* cover thumbnail (or a tile while it is still loading / for folders) */
+        /* Bottom-screen library rows intentionally use a CD instead of album artwork.
+         * Album art belongs to the top-screen carousel / Now Playing view; keeping it
+         * out of the browser makes the list cleaner and avoids duplicate artwork. */
         const float ts = 30, tx = RX + 7, tyy = y + (RH - ts) / 2;
-        C3D_Tex *tex = NULL;
-        if (!e->is_dir) {
-            if (cur_row && art_ready()) tex = art_image()->tex;
-            else { float fd; tex = flow_tex(idx, &fd); }
-        }
-        if (tex) {
-            draw_thumb(tex, tx, tyy, ts, 0.30f);
-        } else {
-            Rgb tc = e->is_dir ? mix_rgb(th_sel, th_tx, 60) : tile_color(e->name);
+        if (e->is_dir) {
+            Rgb tc = mix_rgb(th_sel, th_tx, 60);
             rrect(tx, tyy, ts, ts, 6, 0.30f, C(tc));
-            if (e->is_dir) {
-                C2D_DrawRectSolid(tx + 6, tyy + 9, 0.45f, 8, 4, cText);
-                C2D_DrawRectSolid(tx + 6, tyy + 12, 0.45f, 18, 12, cText);
-            } else if (!playing) {
-                icon_small_note(tx + 8.5f, tyy + 7, cText);
-            }
-        }
-        if (playing) {                                      /* animated bars over the thumbnail */
-            if (tex) C2D_DrawRectSolid(tx, tyy + ts - 14, 0.42f, ts, 14, C2D_Color32(0, 0, 0, 170));
-            for (int k = 0; k < 3; k++) {
-                float hb = 3.0f + 9.0f * (0.5f + 0.5f * sinf(eq_phase * 2.0f + k * 1.7f));
-                C2D_DrawRectSolid(tx + 7 + k * 7, tyy + ts - 3 - hb, 0.45f, 4, hb, cAcc);
-            }
+            C2D_DrawRectSolid(tx + 6, tyy + 9, 0.45f, 8, 4, cText);
+            C2D_DrawRectSolid(tx + 6, tyy + 12, 0.45f, 18, 12, cText);
+        } else {
+            rrect(tx, tyy, ts, ts, 6, 0.18f, cTrk);
+            icon_cd(tx + ts / 2.0f, tyy + ts / 2.0f, 10.5f, playing ? 0.56f : 0.38f, false);
         }
 
         const float lx = RX + 46;

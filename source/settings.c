@@ -96,6 +96,7 @@ void settings_defaults(Settings *s)
     s->display_mode = 0;
     s->glow_color = 0;
     s->dyn_color = true;
+    s->brightness = 5;                 /* setup / first-run default: full brightness */
     s->batt_style = 0;
     s->oled = false;
     s->saver = false;

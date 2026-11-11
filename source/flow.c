@@ -354,7 +354,19 @@ static void draw_item(const FlowItem *it, float o, float appear, FlowBgFn bgf)
 
     C2D_Image img;
     img.tex = it->tex;
-    int n = (t < 0.02f) ? 1 : (int)ceilf(w / 3.0f);
+
+    /* The centre card is the hero artwork. Draw it as one clean square so it never
+     * inherits the perspective strip seams used by the side cards. The side cards
+     * continue through the perspective path below. */
+    if (t < 0.02f) {
+        const float hs = FACE;
+        const float x0 = CX - hs / 2.0f;
+        const float y0 = CY - hs / 2.0f;
+        C2D_DrawImageAt(img, x0, y0, z, NULL, 1.0f, 1.0f);
+        return;
+    }
+
+    int n = (int)ceilf(w / 3.0f);
     if (n < 1) n = 1;
     float refl = REFLECT;
 
