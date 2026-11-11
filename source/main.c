@@ -1445,7 +1445,7 @@ static void neon_ring(float w, float h, float z)
 }
 
 /* Spinning compact disc: a rim, a dark body, two sheen wedges that rotate with the music and a hub. */
-static void icon_cd(float cx, float cy, float r, float z, bool spin)
+static void icon_cd(float cx, float cy, float r, float z)
 {
     const u32 cAcc = C(th_acc), cGl = neon_glow();
     const u32 cBody = C(mix_rgb(th_bg, th_tx, 36));
@@ -1457,8 +1457,30 @@ static void icon_cd(float cx, float cy, float r, float z, bool spin)
     C2D_DrawCircleSolid(cx, cy, z + 0.004f, r - 1.4f, cBody);
     for (int w = 0; w < 2; w++) {
         for (int i = 0; i < 3; i++) {
-            const float phase = spin ? cd_phase : 0.0f;
-            const float a0 = phase + (float)w * 3.14159f + (float)i * 0.32f, a1 = a0 + 0.32f;
+            const float a0 = cd_phase + (float)w * 3.14159f + (float)i * 0.32f, a1 = a0 + 0.32f;
+            C2D_DrawTriangle(cx, cy, cMid, cx + cosf(a0) * rr, cy + sinf(a0) * rr, cLite,
+                             cx + cosf(a1) * rr, cy + sinf(a1) * rr, cLite, z + 0.006f);
+        }
+    }
+    C2D_DrawCircleSolid(cx, cy, z + 0.008f, r * 0.36f, cAcc);
+    C2D_DrawCircleSolid(cx, cy, z + 0.010f, r * 0.17f, C(th_bg));
+}
+
+/* Static CD used by browser rows. It deliberately does not read cd_phase, so the
+ * library artwork never animates when another song starts playing. */
+static void icon_cd_static(float cx, float cy, float r, float z)
+{
+    const u32 cAcc = C(th_acc), cGl = neon_glow();
+    const u32 cBody = C(mix_rgb(th_bg, th_tx, 36));
+    const u32 cMid  = C(mix_rgb(th_bg, th_acc, 90));
+    const u32 cLite = C(mix_rgb(th_acc, th_tx, 150));
+    const float rr = (r - 1.5f) * 0.97f;
+    C2D_DrawCircleSolid(cx, cy, z, r + 1.5f, cGl);
+    C2D_DrawCircleSolid(cx, cy, z + 0.002f, r, cAcc);
+    C2D_DrawCircleSolid(cx, cy, z + 0.004f, r - 1.4f, cBody);
+    for (int w = 0; w < 2; w++) {
+        for (int i = 0; i < 3; i++) {
+            const float a0 = (float)w * 3.14159f + (float)i * 0.32f, a1 = a0 + 0.32f;
             C2D_DrawTriangle(cx, cy, cMid, cx + cosf(a0) * rr, cy + sinf(a0) * rr, cLite,
                              cx + cosf(a1) * rr, cy + sinf(a1) * rr, cLite, z + 0.006f);
         }
@@ -2034,7 +2056,7 @@ static void draw_top(void)
     /* ---- song panel: the same look as a highlighted row on the bottom screen ---- */
     const float py = 176, ph = 40, pcy = py + ph / 2;
     neon_box(24, py, 352, ph, 12, 0.08f, cAcc, cGlow, cRowSel);
-    icon_cd(48, pcy, 14.0f, 0.10f, true);                          /* spins while the music plays */
+    icon_cd(48, pcy, 14.0f, 0.10f);                          /* spins while the music plays */
 
     const char *title = "Nothing playing", *sub = "Pick a song to start";
     if (track_loaded) {
@@ -2140,7 +2162,7 @@ static void draw_lyrics_top(void)
 
     /* ---- header: LYRICS | song - artist | state ---- */
     neon_box(8, 4, 384, 22, 11.0f, 0.08f, cAcc, cGlow, cFill);
-    icon_cd(24, 15, 7.5f, 0.10f, true);
+    icon_cd(24, 15, 7.5f, 0.10f);
     row_text("LYRICS", 38, 4, 22, 0.50f, cAcc, C2D_AlignLeft, 60);
     char hd[300];
     const char *title = cur.title[0] ? cur.title : base_name(cur_path);
@@ -2269,7 +2291,7 @@ static void draw_deck(void)
     /* The bottom mini-player is deliberately artwork-free. Use the same CD language
      * as the transport instead, while the full album artwork remains on the top screen. */
     rrect(9.0f, y + 4.0f, 38.0f, 38.0f, 7.0f, 0.18f, cTrk);
-    icon_cd(28.0f, y + 23.0f, 10.5f, playing ? 0.56f : 0.40f, true);
+    icon_cd(28.0f, y + 23.0f, 10.5f, playing ? 0.56f : 0.40f);
     char sub[48];
     if (slider_drag) {
         char a[16], b[16];
@@ -2399,7 +2421,7 @@ static void draw_browser(void)
             C2D_DrawRectSolid(tx + 6, tyy + 12, 0.45f, 18, 12, cText);
         } else {
             rrect(tx, tyy, ts, ts, 6, 0.18f, cTrk);
-            icon_cd(tx + ts / 2.0f, tyy + ts / 2.0f, 10.5f, playing ? 0.56f : 0.38f, false);
+            icon_cd_static(tx + ts / 2.0f, tyy + ts / 2.0f, 10.5f, playing ? 0.56f : 0.38f);
         }
 
         const float lx = RX + 46;
