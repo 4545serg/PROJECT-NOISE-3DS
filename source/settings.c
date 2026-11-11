@@ -89,7 +89,7 @@ void settings_defaults(Settings *s)
 {
     memset(s, 0, sizeof(*s));
     settings_apply_preset(s, 0);
-    s->ui_ver = 2;
+    s->ui_ver = 3;
     s->glow = 2;
     s->seek_step = 5;
     s->fade_speed = 1;
@@ -219,7 +219,8 @@ void settings_load(Settings *s)
     if (s->ly_font < 0 || s->ly_font > 2) s->ly_font = 0;
     if (s->glow_color < 0 || s->glow_color >= GLOWCOL_COUNT) s->glow_color = 0;
     if (s->batt_style < 0 || s->batt_style > 1) s->batt_style = 0;
-    if (s->brightness < 1 || s->brightness > 5) s->brightness = 3;
+    if (s->brightness < 1 || s->brightness > 5) s->brightness = 5;
+    if (s->ui_ver < 3) { s->brightness = 5; s->ui_ver = 3; }
     {
         bool ok = false;
         for (int i = 0; i < SEEK_STEP_COUNT; i++) if (s->seek_step == SEEK_STEPS[i]) ok = true;
@@ -235,7 +236,7 @@ void settings_load(Settings *s)
     if (s->ui_ver < 2) {                 /* migrate: old Neon (0) becomes the new blue default, others shift by one */
         if (s->preset == 0) settings_apply_preset(s, 0);
         else if (s->preset >= 1) s->preset += 1;
-        s->ui_ver = 2;
+        s->ui_ver = 3;
     }
     if (s->preset < -1 || s->preset >= PRESET_COUNT) s->preset = -1;
 }

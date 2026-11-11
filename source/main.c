@@ -84,7 +84,7 @@ static const char *PAGE_NAMES[PAGES]     = { "Display", "Audio", "Player", "Lyri
 #define SCR_H   240
 
 /* ambient glow: how strongly the cover colour tints the top screen, and how far it reaches */
-static const float GLOW_STRENGTH[GLOW_COUNT] = { 0.0f, 0.30f, 0.50f };
+static const float GLOW_STRENGTH[GLOW_COUNT] = { 0.0f, 0.22f, 0.36f };
 #define GLOW_CORE   62.0f      /* half-size of the fully-lit core around the centre cover */
 #define GLOW_REACH  190.0f     /* distance from that core at which the glow has faded out */
 
@@ -2010,6 +2010,7 @@ static void draw_top(void)
         const float ease = art_fade * art_fade * (3.0f - 2.0f * art_fade);
         const float k = S.saver ? 1.0f : (0.94f + 0.06f * ease) * (1.0f + 0.010f * vis_bass);
         const float sz = ART_SZ * k, ox = ART_X + (ART_SZ - sz) / 2.0f, oy = ART_Y + (ART_SZ - sz) / 2.0f;
+        rrect(ox - 2.0f, oy - 2.0f, sz + 4.0f, sz + 4.0f, 7.0f, 0.16f, neon_glow());
         C2D_DrawImageAt(*art_image(), ox, oy, 0.40f, NULL, sz / 128.0f, sz / 128.0f);
         if (art_fade < 0.999f) {
             C2D_DrawRectSolid(ox, oy, 0.41f, sz, sz,
@@ -2265,10 +2266,14 @@ static void draw_deck(void)
     float frac = slider_drag ? slider_frac : progress_frac(pos, dur);
     neon_box(6, y, 114, h, 13, 0.20f, cAcc, cGlow, cFill);
     if (art_ready()) {
-        const float cs = 30.0f;
+        const float cs = 34.0f;
+        /* Dedicated artwork slot: never replace real art with the CD glyph once the
+         * texture is ready, and keep the crop square and crisp at the native 3DS size. */
+        rrect(9.0f, y + 4.0f, cs + 4.0f, cs + 4.0f, 7.0f, 0.22f, cGlow);
         C2D_DrawImageAt(*art_image(), 11.0f, y + 6.0f, 0.46f, NULL, cs / 128.0f, cs / 128.0f);
     } else {
-        icon_cd(23, y + 18, 10.0f, 0.45f);
+        rrect(9.0f, y + 4.0f, 38.0f, 38.0f, 7.0f, 0.18f, cTrk);
+        icon_cd(28.0f, y + 23.0f, 10.0f, 0.45f);
     }
     char sub[48];
     if (slider_drag) {
@@ -2280,8 +2285,8 @@ static void draw_deck(void)
         snprintf(sub, sizeof sub, "%s", track_loaded ? cur.artist : "Pick a song");
     }
     const char *title = track_loaded ? (cur.title[0] ? cur.title : base_name(cur_path)) : "Not playing";
-    draw_marquee(title, 46, y + 2, 0.50f, track_loaded ? cAcc : cText, 68, 0);
-    if (sub[0]) draw_marquee(sub, 46, y + 18, 0.34f, cDim, 68, 1);
+    draw_marquee(title, 50, y + 1, 0.49f, track_loaded ? cAcc : cText, 62, 0);
+    if (sub[0]) draw_marquee(sub, 50, y + 18, 0.33f, cDim, 62, 1);
 
     const float tw = SL_X1 - SL_X0, ty = y + 33;
     rrect(SL_X0, ty - 2, tw, 4, 2, 0.30f, cTrk);
@@ -2710,7 +2715,16 @@ static void draw_card(int card)
 
         row_text(row_label(r), 18, y, rh, 0.45f, (r == ROW_EXIT || r == ROW_LY_CLEAR) ? cDanger : cText, C2D_AlignLeft, is_switch_row(r) ? 190 : 128);
 
-        if (is_switch_row(r)) {
+        if (r == ROW_BRIGHTNESS) {
+            /* Real brightness slider: easy to understand at a glance and draggable. */
+            const float sx = 160.0f, sw = 140.0f, sy = y + rh / 2.0f;
+            rrect(sx, sy - 3, sw, 6, 3, 0.30f, cBg);
+            const float frac = ((float)S.brightness - 1.0f) / 4.0f;
+            rrect(sx, sy - 3, sw * frac, 6, 3, 0.32f, cAcc);
+            C2D_DrawCircleSolid(sx + sw * frac, sy, 0.34f, 5.2f, cAcc);
+            char bv[8]; snprintf(bv, sizeof bv, "%d", S.brightness);
+            row_text(bv, 304, y, rh, 0.40f, cText, C2D_AlignRight, 18);
+        } else if (is_switch_row(r)) {
             if (r == ROW_SLEEP_ENABLE && sleep_timer_active) {          /* live countdown beside the label */
                 s64 left = (s64)sleep_timer_deadline - (s64)osGetTime();
                 fmt_time(val, sizeof val, left > 0 ? (u32)left : 0);
@@ -3112,6 +3126,14 @@ static void card_touch(touchPosition tp, int card)
     if (r == ROW_EXIT)  { confirm_exit = true; confirm_sel = 0; return; }
     if (r == ROW_GUIDE) { start_wizard(); return; }
     if (r == ROW_LY_CLEAR) { clear_lyrics_cache(); return; }
+    if (r == ROW_BRIGHTNESS) {
+        if (tp.px >= 148 && tp.px <= 306) {
+            int v = 1 + (int)lroundf(((float)(tp.px - 160) / 140.0f) * 4.0f);
+            if (v < 1) v = 1; if (v > 5) v = 5;
+            if (v != S.brightness) { S.brightness = v; screen_brightness_apply(); mark_dirty(); }
+        }
+        return;
+    }
     if (is_switch_row(r)) { set_adjust(+1); return; }
 
     if (is_slider_row(r)) {
