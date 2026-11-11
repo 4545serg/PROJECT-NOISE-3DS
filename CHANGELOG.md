@@ -1,3 +1,12 @@
+## 2026-11-11 — UI / Artwork / Display polish
+
+- Fixed album-art acceptance for larger common embedded covers and invalidated the old cover cache format so repaired textures are regenerated.
+- Added album artwork to the bottom-screen Now Playing deck.
+- Added persistent 3DS screen brightness control (1–5) using GSPLCD for both screens.
+- Removed Theme and Wallpaper controls from the settings UI.
+- Renamed the settings display category to Display and refreshed the settings/setup row layout.
+- Kept OLED mode, restrained neon, lyrics font, lyrics caching and background lyrics loading intact.
+
 ## Lyrics networking repair
 
 - Use devkitPro 3DS curl + mbedTLS for online lyrics before the legacy http:C path.

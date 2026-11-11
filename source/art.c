@@ -7,8 +7,8 @@
 #include "stb_image.h"
 
 #define ART_SIZE        128
-/* Old 3DS has little RAM: skip images above ~1.2 megapixels (placeholder is shown). */
-#define ART_MAX_PIXELS  1200000L
+/* Keep memory bounded while accepting common 1000-1800px album artwork. */
+#define ART_MAX_PIXELS  3500000L
 
 static C3D_Tex            g_tex;
 static bool               g_have;

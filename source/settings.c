@@ -94,7 +94,6 @@ void settings_defaults(Settings *s)
     s->seek_step = 5;
     s->fade_speed = 1;
     s->display_mode = 0;
-    s->wallpaper = 0;
     s->glow_color = 0;
     s->dyn_color = true;
     s->batt_style = 0;
@@ -167,8 +166,6 @@ void settings_load(Settings *s)
             s->fade_speed = atoi(value);
         else if (!strcmp(key, "display_mode"))
             s->display_mode = atoi(value);
-        else if (!strcmp(key, "wallpaper"))
-            s->wallpaper = atoi(value);
         else if (!strcmp(key, "seek_step"))
             s->seek_step = atoi(value);
         else if (!strcmp(key, "glow_color"))
@@ -177,6 +174,8 @@ void settings_load(Settings *s)
             s->dyn_color = atoi(value) != 0;
         else if (!strcmp(key, "batt_style"))
             s->batt_style = atoi(value);
+        else if (!strcmp(key, "brightness"))
+            s->brightness = atoi(value);
         else if (!strcmp(key, "oled"))
             s->oled = atoi(value) != 0;
         else if (!strcmp(key, "saver"))
@@ -217,10 +216,10 @@ void settings_load(Settings *s)
     if (s->glow < 0 || s->glow >= GLOW_COUNT) s->glow = 2;
     if (s->fade_speed < 0 || s->fade_speed >= FADE_COUNT) s->fade_speed = 1;
     if (s->display_mode < 0 || s->display_mode > 3) s->display_mode = 0;
-    if (s->wallpaper < 0 || s->wallpaper > 4) s->wallpaper = 0;
     if (s->ly_font < 0 || s->ly_font > 2) s->ly_font = 0;
     if (s->glow_color < 0 || s->glow_color >= GLOWCOL_COUNT) s->glow_color = 0;
     if (s->batt_style < 0 || s->batt_style > 1) s->batt_style = 0;
+    if (s->brightness < 1 || s->brightness > 5) s->brightness = 3;
     {
         bool ok = false;
         for (int i = 0; i < SEEK_STEP_COUNT; i++) if (s->seek_step == SEEK_STEPS[i]) ok = true;
@@ -265,11 +264,11 @@ bool settings_save(const Settings *s)
     fprintf(f, "glow=%d\n", s->glow);
     fprintf(f, "fade_speed=%d\n", s->fade_speed);
     fprintf(f, "display_mode=%d\n", s->display_mode);
-    fprintf(f, "wallpaper=%d\n", s->wallpaper);
     fprintf(f, "seek_step=%d\n", s->seek_step);
     fprintf(f, "glow_color=%d\n", s->glow_color);
     fprintf(f, "dyn_color=%d\n", s->dyn_color ? 1 : 0);
     fprintf(f, "batt_style=%d\n", s->batt_style);
+    fprintf(f, "brightness=%d\n", s->brightness);
     fprintf(f, "oled=%d\n", s->oled ? 1 : 0);
     fprintf(f, "saver=%d\n", s->saver ? 1 : 0);
     fprintf(f, "show_info=%d\n", s->show_info ? 1 : 0);

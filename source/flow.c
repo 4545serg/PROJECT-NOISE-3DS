@@ -13,7 +13,7 @@
 
 #define SLOTS      20
 #define COVER_DIR  DATA_DIR "/covers"
-#define CACHE_MAGIC 0x31435A4Eu          /* "NZC1" */
+#define CACHE_MAGIC 0x32435A4Eu          /* "NZC2" */
 #define CX        200.0f       /* screen-space centre of the flow (top screen is 400 wide) */
 #define CY        90.0f        /* vertical centre of the covers (cover is 124 tall at y=28; keep in sync with ART_* in main.c) */
 #define FACE      124.0f       /* face-on cover size */
