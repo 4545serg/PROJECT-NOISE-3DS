@@ -203,14 +203,21 @@ static void vis_update(void)
 {
     float b[AUDIO_VIS_BANDS], w[AUDIO_VIS_WAVE];
     const bool live = audio_ok && audio_get_vis(b, w);
+    /* Keep the analyser responsive, but deliberately tame the attack/release so normal
+     * volume changes do not turn into large visual spikes. This is intentionally cheap
+     * scalar smoothing for the Old 3DS; no extra FFT/shader work is introduced here. */
     for (int i = 0; i < AUDIO_VIS_BANDS; i++) {
-        const float t = live ? b[i] : 0.0f;
-        vis_band[i] += (t - vis_band[i]) * (t > vis_band[i] ? 0.65f : 0.13f);
-        vis_peak[i] -= 0.010f;
+        const float t = live ? b[i] * 0.62f : 0.0f;
+        const float rate = t > vis_band[i] ? 0.22f : 0.075f;
+        vis_band[i] += (t - vis_band[i]) * rate;
+        vis_peak[i] -= 0.0065f;
         if (vis_peak[i] < vis_band[i]) vis_peak[i] = vis_band[i];
     }
-    for (int k = 0; k < AUDIO_VIS_WAVE; k++) vis_wave[k] += ((live ? w[k] : 0.0f) - vis_wave[k]) * 0.5f;
-    vis_bass += (((vis_band[0] + vis_band[1] + vis_band[2]) / 3.0f) - vis_bass) * 0.25f;
+    for (int k = 0; k < AUDIO_VIS_WAVE; k++) {
+        const float target = live ? w[k] * 0.58f : 0.0f;
+        vis_wave[k] += (target - vis_wave[k]) * 0.18f;
+    }
+    vis_bass += (((vis_band[0] + vis_band[1] + vis_band[2]) / 3.0f) - vis_bass) * 0.12f;
 }
 static bool      quit_req = false;
 static char      cur_path[800];
@@ -378,6 +385,47 @@ static void draw_text(const char *s, float x, float y, float sc, u32 color, u32 
     }
     C2D_TextOptimize(&t);
     C2D_DrawText(&t, C2D_WithColor | align, x, y, text_z, sc, sc, color);
+}
+
+static void draw_text_glow(const char *s, float x, float y, float sc, u32 align, Rgb col, Rgb gcol,
+                           float glow_alpha, float glow_width, float maxw);
+
+/* Draw a single-line marquee without allocating or adding a rendering effect. The
+ * visible window advances slowly only when the text is actually wider than its panel. */
+static void draw_marquee_text(const char *s, float x, float y, float sc, u32 color, float maxw, bool glow)
+{
+    if (!s || !s[0]) return;
+    char tmp[300];
+    snprintf(tmp, sizeof tmp, "%s", s);
+    C2D_Text t;
+    C2D_TextParse(&t, tbuf, tmp);
+    float w = 0, h = 0;
+    C2D_TextGetDimensions(&t, sc, sc, &w, &h);
+    if (w <= maxw) {
+        if (glow) draw_text_glow(tmp, x, y, sc, C2D_AlignLeft, th_acc, th_glow, 0.55f, 1.0f, maxw);
+        else draw_text(tmp, x, y, sc, color, C2D_AlignLeft, maxw);
+        return;
+    }
+    const size_t len = strlen(tmp);
+    const int chars = (int)(len * maxw / w);
+    const int window = chars > 4 ? chars - 2 : 1;
+    const int cycle = (int)len + window + 8;
+    const int phase = (int)((osGetTime() / 75ULL) % (u64)cycle);
+    int start = phase;
+    if (start > (int)len - window) start = (int)len - window;
+    if (start < 0) start = 0;
+    size_t end = (size_t)start + (size_t)window;
+    if (end > len) end = len;
+    while (end > (size_t)start && (((unsigned char)tmp[end]) & 0xC0) == 0x80) end--;
+    char view[300];
+    size_t n = end - (size_t)start;
+    if (n > sizeof view - 4) n = sizeof view - 4;
+    memcpy(view, tmp + start, n);
+    view[n] = 0;
+    if (start > 0) { memmove(view + 1, view, n + 1); view[0] = ' '; }
+    if (end < len && strlen(view) < sizeof view - 4) strcat(view, "...");
+    if (glow) draw_text_glow(view, x, y, sc, C2D_AlignLeft, th_acc, th_glow, 0.55f, 1.0f, maxw);
+    else draw_text(view, x, y, sc, color, C2D_AlignLeft, maxw);
 }
 
 static void draw_text_sh(const char *s, float x, float y, float sc, u32 color, u32 align, float maxw)
@@ -1670,7 +1718,7 @@ static void pv_scope(void)
     for (int i = 0; i < AUDIO_VIS_WAVE; i++) {
         float w = vis_wave[i];
         if (idle) w = 0.16f * sinf(ts * 2.0f + (float)i * 0.45f);
-        w *= 1.5f;
+        w *= 0.72f;
         if (w > 1.0f) w = 1.0f;
         if (w < -1.0f) w = -1.0f;
         const float x = ax0 + (float)i * step, y = mid + w * amp;
@@ -1683,7 +1731,7 @@ static void pv_scope(void)
     /* level strip along the bottom */
     const int SEG = lite ? 20 : 40;
     const float sw = (ax1 - ax0) / (float)SEG;
-    const int lit = (int)(pv_clamp01(vis_bass * 1.5f) * (float)SEG + 0.5f);
+    const int lit = (int)(pv_clamp01(vis_bass * 0.95f) * (float)SEG + 0.5f);
     for (int k = 0; k < SEG; k++) {
         u32 col = k < lit ? (k >= SEG - 4 ? cMid : cOn) : cGhost;
         if (k >= lit && lite) continue;
@@ -1728,7 +1776,7 @@ static void pv_deck(void)
     for (int i = 0; i < 6; i++) lo += vis_band[i] / 6.0f;
     for (int i = 5; i < AUDIO_VIS_BANDS; i++) hi += vis_band[i] / 7.0f;
     if (pv_standby()) { const float ts = pv_tsec(); lo = 0.10f + 0.05f * sinf(ts * 1.3f); hi = 0.10f + 0.05f * sinf(ts * 1.1f + 1.0f); }
-    lo *= 1.35f; hi *= 1.7f;
+    lo *= 0.82f; hi *= 0.92f;
     vu_l += (lo - vu_l) * (lo > vu_l ? 0.45f : 0.12f);              /* needles: quick rise, lazy fall */
     vu_r += (hi - vu_r) * (hi > vu_r ? 0.45f : 0.12f);
 
@@ -1938,9 +1986,10 @@ static void draw_top(void)
                           : (e->title[0] ? e->title : base_name(e->name));
         sub = e->is_dir ? "Folder" : e->artist;
     }
-    if (halo_text) draw_text_glow(title, 72, py + 2, 0.70f, C2D_AlignLeft, th_acc, th_glow, 0.55f, 1.0f, track_loaded ? 262 : 280);
-    else draw_text(title, 72, py + 2, 0.70f, cAcc, C2D_AlignLeft, track_loaded ? 262 : 280);
-    if (sub[0]) draw_text(sub, 72, py + 23, 0.44f, cText, C2D_AlignLeft, 262);
+    /* Clear hierarchy: title is the primary line, artist is secondary. Both stay inside
+     * the panel and marquee automatically when metadata is longer than the available width. */
+    draw_marquee_text(title, 72, py + 2, 0.70f, cAcc, track_loaded ? 262.0f : 280.0f, halo_text);
+    if (sub[0]) draw_marquee_text(sub, 72, py + 23, 0.44f, cText, 262.0f, false);
     if (track_loaded) {
         if (track_is_favorite()) icon_heart(357, pcy, 7.0f, cAcc);
         else icon_heart_line(357, pcy, 7.0f, cDim, cRowSel);
@@ -1971,7 +2020,7 @@ static void draw_top(void)
 
 /* ====================================================================== lyrics screen
  * Top screen: current line highlighted in the middle, upcoming lines below (synced), or a scrollable text
- * (plain). Bottom screen: status, search / settings buttons and the playback deck. */
+ * (plain). Bottom screen intentionally remains the normal browser/player UI. */
 static float fit_scale(const char *s, float sc, float maxw)       /* shrink a line to fit the screen width */
 {
     char tmp[300];
@@ -2074,9 +2123,14 @@ static void draw_lyrics_top(void)
         }
     } else {
         const float max_off = n > 8 ? (float)(n - 8) : 0.0f;
-        if (ly_goal > max_off) ly_goal = max_off;
-        if (ly_goal < 0.0f) ly_goal = 0.0f;
-        if (S.saver) ly_pos = ly_goal; else ly_pos += (ly_goal - ly_pos) * 0.30f;
+        /* Plain text is advanced gently so long lyrics remain readable without
+         * requiring the bottom screen to become a separate lyrics UI. */
+        if (max_off > 0.0f) {
+            const float span = max_off + 2.0f;
+            ly_goal = fmodf((float)(osGetTime() % (u64)60000) / 7000.0f, span);
+            if (ly_goal > max_off) ly_goal = max_off;
+        } else ly_goal = 0.0f;
+        if (S.saver) ly_pos = ly_goal; else ly_pos += (ly_goal - ly_pos) * 0.08f;
         for (int i = (int)floorf(ly_pos); i < n && i < (int)ly_pos + 10; i++) {
             const float y = 38.0f + ((float)i - ly_pos) * 21.0f;
             float a = fminf((y - 28.0f) / 12.0f, (206.0f - y) / 12.0f);
@@ -2249,7 +2303,12 @@ static void draw_browser(void)
         row_text("Search Music...", 40, 35, 26, 0.42f, cDim, C2D_AlignLeft, 160);
     }
     /* LYRICS: opens the lyrics screen for the song that is loaded */
-    if (track_loaded) {
+    if (track_loaded && lyrics_open) {
+        /* Active state belongs to the LYRICS control itself; the rest of the bottom
+         * screen keeps its normal colours and layout. */
+        neon_box(246, 35, 66, 26, 13, 0.30f, cAcc, cGlow, C(mix_rgb(th_bg, th_acc, 42)));
+        row_text("LYRICS", 279, 35, 26, 0.40f, cBg, C2D_AlignCenter, 58);
+    } else if (track_loaded) {
         neon_box(246, 35, 66, 26, 13, 0.20f, cAcc, cGlow, cFill);
         row_text("LYRICS", 279, 35, 26, 0.40f, cAcc, C2D_AlignCenter, 58);
     } else {
@@ -2983,7 +3042,7 @@ static void handle_header_tap(int px, int py)    /* tabs (All Songs / Liked Song
         else               open_up_next();
         return;
     }
-    if (px >= 244) open_lyrics();                       /* LYRICS pill */
+    if (px >= 244) { if (lyrics_open) lyrics_open = false; else open_lyrics(); } /* LYRICS pill */
     else if (L_is_search && px >= 204) exit_search();
     else open_search();
 }
@@ -3563,24 +3622,6 @@ int main(void)
             if (kd & KEY_TOUCH) handle_settings_touch(tp);
             if ((kh & KEY_TOUCH) && set_drag >= 0) slider_apply(set_drag, tp.px, tp.py);
             if (ku & KEY_TOUCH) set_drag = -1;
-        } else if (lyrics_open) {
-            if (kd & KEY_B) lyrics_open = false;
-            if (kd & KEY_SELECT) { settings_open = true; set_row = ROW_LY_SEARCH; }
-            if (kd & KEY_A) ly_search_now();
-            if (lyrics_state() == LY_READY && !lyrics_synced()) {          /* plain text scrolls by hand */
-                if (repeat_fire(kh, KEY_DUP, &hold_up))     ly_goal -= 1.0f;
-                if (repeat_fire(kh, KEY_DDOWN, &hold_down)) ly_goal += 1.0f;
-            }
-            if (repeat_seek(kh, KEY_DLEFT, &hold_left))   skip_seconds(-S.seek_step);
-            if (repeat_seek(kh, KEY_DRIGHT, &hold_right)) skip_seconds(+S.seek_step);
-            if (kd & KEY_TOUCH) {
-                if (tp.py < 40) { if (tp.px >= 244) lyrics_open = false; }
-                else if (tp.py >= CTRL_TOP) handle_ctrl_tap(tp.px, tp.py);
-                else if (tp.py >= 100 && tp.py < 134 && lyrics_state() != LY_READY) ly_search_now();
-                else if (tp.py >= 154 && tp.py < 182) { settings_open = true; set_row = ROW_LY_SEARCH; }
-            }
-            if ((kh & KEY_TOUCH) && slider_drag) slider_frac = frac_from_px(tp.px);
-            if ((ku & KEY_TOUCH) && slider_drag) { seek_to(slider_frac); slider_drag = false; }
         } else {
             if (kd & KEY_SELECT) { settings_open = true; set_row = 0; }
 
@@ -3591,7 +3632,10 @@ int main(void)
                 else if (audio_is_paused()) { audio_resume(); apply_lid(); }
                 else if (!audio_is_active()) toggle_play();
             }
-            if ((kd & KEY_B) && audio_is_active() && !audio_is_paused()) { audio_pause(); apply_lid(); }
+            if (kd & KEY_B) {
+                if (lyrics_open) lyrics_open = false;
+                else if (audio_is_active() && !audio_is_paused()) { audio_pause(); apply_lid(); }
+            }
             if ((kd & KEY_X) && sel < L.n && !L.e[sel].is_dir) queue_add_from_list(sel, true);
             if ((kd & KEY_Y) && sel < L.n && !L.e[sel].is_dir) queue_add_from_list(sel, false);
             if ((kd & KEY_ZL) && sel < L.n && !L.e[sel].is_dir) { char fp[256]; entry_relative_path(&L.e[sel], fp, sizeof fp); favorite_toggle(fp); }
@@ -3706,7 +3750,6 @@ int main(void)
         else if (wizard_open) draw_wizard_bottom();
         else if (settings_open) draw_settings();
         else if (queue_open) draw_queue();
-        else if (lyrics_open) draw_lyrics_bottom();
         else draw_browser();
         draw_toast();
         if (bot_fade > 0.01f) {                                   /* page transition: fade in from the background */
