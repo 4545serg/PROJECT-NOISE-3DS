@@ -24,4 +24,4 @@ The UI has been restyled to closely follow the supplied PROJECT NOISE reference 
 - List rows were compressed to leave room for the new playback deck.
 - Existing physical-button behavior, favorites, search, queue, playback, and settings logic remain in place.
 
-The redesign is implemented in `source/main.c`, which is the file compiled by the project's Makefile.
+The redesign is implemented in `source/main.c`, the only copy of the sources (the Makefile compiles `source/*.c`).

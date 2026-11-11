@@ -1392,8 +1392,8 @@ static void draw_browser(void)
     rrect(109, 29, 100, 22, 8, 0.40f, cSel);
     rrect(211, 29, 102, 22, 8, 0.40f, cSel);
     row_text("♫  All Songs", 57, 31, 18, 0.36f, cBg, C2D_AlignCenter, 92);
-    row_text("♥  Liked Songs", 159, 31, 0.34f, cText, C2D_AlignCenter, 94);
-    row_text("☷  Playlists", 262, 31, 0.34f, cText, C2D_AlignCenter, 96);
+    row_text("♥  Liked Songs", 159, 31, 18, 0.34f, cText, C2D_AlignCenter, 94);
+    row_text("☷  Playlists", 262, 31, 18, 0.34f, cText, C2D_AlignCenter, 96);
 
     int loads_this_frame = 0;
     for (int i = 0; i < VIS_ROWS; i++) {
@@ -1438,7 +1438,7 @@ static void draw_browser(void)
             if (e->meta_loaded && e->artist[0]) draw_text(e->artist, lx, y + 16, 0.30f, cDim, C2D_AlignLeft, 175);
             char favpath[256]; entry_relative_path(e, favpath, sizeof favpath);
             bool fav = is_favorite(favpath);
-            draw_text(fav ? "♥" : "♡", 292, y + 6, 0.44f, fav ? cAcc : cDim, C2D_AlignCenter, 0);
+            draw_text("♥", 292, y + 6, 0.44f, fav ? cAcc : cDim, C2D_AlignCenter, 0);
         }
     }
 
