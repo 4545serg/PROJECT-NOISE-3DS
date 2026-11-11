@@ -1,5 +1,5 @@
 BasicInfo:
-  Title                   : "PRO NOISE MP3"
+  Title                   : "NOISE"      # max 8 characters (makerom); the HOME Menu name comes from the SMDH
   CompanyCode             : "00"
   ProductCode             : "CTR-P-NOSE"
   ContentType             : Application

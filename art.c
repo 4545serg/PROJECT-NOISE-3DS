@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "libcfg.h"
 #include "stb_image.h"
 
 #define ART_SIZE        128
