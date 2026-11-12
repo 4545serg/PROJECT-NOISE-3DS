@@ -218,7 +218,7 @@ void settings_load(Settings *s)
     if (s->fade_speed < 0 || s->fade_speed >= FADE_COUNT) s->fade_speed = 1;
     if (s->display_mode < 0 || s->display_mode > 3) s->display_mode = 0;
     if (s->wallpaper < 0 || s->wallpaper > 4) s->wallpaper = 0;
-    if (s->ly_font < 0 || s->ly_font > 2) s->ly_font = 0;
+    if (s->ly_font < 0 || s->ly_font > 3) s->ly_font = 0;
     if (s->glow_color < 0 || s->glow_color >= GLOWCOL_COUNT) s->glow_color = 0;
     if (s->batt_style < 0 || s->batt_style > 1) s->batt_style = 0;
     {

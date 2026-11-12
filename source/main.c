@@ -21,6 +21,7 @@
 #include "browser.h"
 #include "flow.h"
 #include "lyrics.h"
+#include "lyfont.h"
 #include "meta.h"
 #include "placeholder.h"
 #include "search.h"
@@ -1091,7 +1092,7 @@ static void set_adjust(int dir)
     } else if (set_row == ROW_LY_SYNC) {
         S.ly_sync = !S.ly_sync;
     } else if (set_row == ROW_LY_FONT) {
-        S.ly_font = (S.ly_font + dir + 3) % 3;
+        S.ly_font = (S.ly_font + dir + 4) % 4;
     } else {
         return;
     }
@@ -2050,12 +2051,30 @@ static void ly_draw_text(const char *s, float x, float y, float sc, u32 color, u
     draw_text(s, x, y, sc, color, align, maxw);
 }
 
+/* Gothic lyrics typeface (Settings > Lyrics > Lyrics font). Lyrics screen only: drawn from the glyph atlas in
+ * lyfont.c; a line it cannot show (accents, other scripts, too long) returns false and the caller uses the
+ * system font, so no lyric is ever lost. yc = vertical centre of the letters. */
+static bool ly_gothic_line(const char *s, float x, float yc, float sc, Rgb col, float glow, float maxw)
+{
+    if (S.ly_font != 0 || !lyfont_ok() || !lyfont_can(s)) return false;
+    const float w = lyfont_width(s, sc);
+    if (w > maxw) sc *= maxw / w;
+    if (sc < 0.34f) return false;
+    if (glow > 0.01f && !S.saver) {                                   /* soft halo: four offset copies */
+        static const float ox[4] = { 1.5f, -1.5f, 0.0f, 0.0f }, oy[4] = { 0.0f, 0.0f, 1.5f, -1.5f };
+        const u32 g = C(mix_rgb(th_bg, th_glow, (int)(110.0f * glow)));
+        for (int i = 0; i < 4; i++) lyfont_draw(s, x + ox[i], yc + oy[i], sc, g, C2D_AlignCenter, text_z - 0.01f);
+    }
+    lyfont_draw(s, x, yc, sc, C(col), C2D_AlignCenter, text_z);
+    return true;
+}
+
 static const char *ly_state_msg(LyState st, const char **sub)
 {
     switch (st) {
-    case LY_LOADING:  *sub = "Your music keeps playing";            return "Searching for lyrics";
+    case LY_LOADING:  *sub = "";                                        return "Searching for lyrics";
     case LY_IDLE:     *sub = "Press A to search online";            return "No saved lyrics for this song";
-    case LY_NOTFOUND: *sub = "Press A to search again";             return "No lyrics found";
+    case LY_NOTFOUND: *sub = "Press A to search again";             return "LYRICS NOT FOUND";
     case LY_OFFLINE:  *sub = "Turn off Offline only to search";     return "No cached lyrics (offline only)";
     case LY_NONET:    *sub = "Connect to Wi-Fi, then press A";      return "No Wi-Fi connection";
     case LY_ERROR:    *sub = "Press A to try again";                return "Couldn't reach the lyrics servers";
@@ -2092,8 +2111,8 @@ static void draw_lyrics_top(void)
     if (!ready) {
         const char *sub;
         const char *msg = ly_state_msg(st, &sub);
-        ly_draw_text(msg, 200, 92, 0.62f, cText, C2D_AlignCenter, 370);
-        ly_draw_text(sub, 200, 118, 0.42f, cDim, C2D_AlignCenter, 370);
+        if (!ly_gothic_line(msg, 200, 100, 0.62f, th_tx, 0.0f, 370)) ly_draw_text(msg, 200, 92, 0.62f, cText, C2D_AlignCenter, 370);
+        if (sub[0]) ly_draw_text(sub, 200, 124, 0.42f, cDim, C2D_AlignCenter, 370);
         if (st == LY_LOADING) {
             const float ts = pv_tsec();
             for (int k = 0; k < 3; k++) {
@@ -2115,10 +2134,14 @@ static void draw_lyrics_top(void)
             const float cy = 118.0f + d * 25.0f;
             const char *tx = lyrics_text(i);
             if (i == idx) {
-                const float sc = fit_scale(tx, 0.70f, 372.0f);
-                draw_text_glow(tx, 200, cy - 14.0f * sc, sc, C2D_AlignCenter, mix_rgb(th_acc, th_tx, 60), th_glow, 0.45f, 1.0f, 372);
+                if (!ly_gothic_line(tx, 200, cy, 0.64f, mix_rgb(th_acc, th_tx, 60), 0.45f, 372.0f)) {
+                    const float sc = fit_scale(tx, 0.70f, 372.0f);
+                    draw_text_glow(tx, 200, cy - 14.0f * sc, sc, C2D_AlignCenter, mix_rgb(th_acc, th_tx, 60), th_glow, 0.45f, 1.0f, 372);
+                }
             } else {
-                draw_text(tx, 200, cy - 14.0f * 0.46f, 0.46f, Ca(mix_rgb(th_tx, th_bg, 55), a), C2D_AlignCenter, 372);
+                const Rgb dim = mix_rgb(mix_rgb(th_tx, th_bg, 55), th_bg, (int)((1.0f - a) * 255.0f));
+                if (!ly_gothic_line(tx, 200, cy, 0.46f, dim, 0.0f, 372.0f))
+                    draw_text(tx, 200, cy - 14.0f * 0.46f, 0.46f, Ca(mix_rgb(th_tx, th_bg, 55), a), C2D_AlignCenter, 372);
             }
         }
     } else {
@@ -2136,7 +2159,8 @@ static void draw_lyrics_top(void)
             float a = fminf((y - 28.0f) / 12.0f, (206.0f - y) / 12.0f);
             if (a <= 0.02f) continue;
             if (a > 1.0f) a = 1.0f;
-            ly_draw_text(lyrics_text(i), 200, y, 0.50f, Ca(th_tx, a), C2D_AlignCenter, 366);
+            if (!ly_gothic_line(lyrics_text(i), 200, y + 9.0f, 0.46f, mix_rgb(th_bg, th_tx, (int)(a * 255.0f)), 0.0f, 366.0f))
+                ly_draw_text(lyrics_text(i), 200, y, 0.50f, Ca(th_tx, a), C2D_AlignCenter, 366);
         }
         if (n > 8) {                                                   /* scroll position */
             rrect(391, 36, 4, 164, 2, 0.08f, cTrk);
@@ -2540,7 +2564,7 @@ static const char *UI_WALLPAPER_NAMES[5] = { "Plain", "Scanlines", "Dots", "Corn
 static const char *UI_DISPLAY_NAMES[4]   = { "Cover", "LED Spectrum", "Scope", "VU Deck" };
 static const char *UI_BATT_NAMES[2]      = { "Icon", "Percent" };
 static const char *UI_CLOCK_NAMES[3]     = { "Off", "12-hour", "24-hour" };
-static const char *UI_LY_FONT_NAMES[3]   = { "System", "Bold", "Compact" };
+static const char *UI_LY_FONT_NAMES[4]   = { "Gothic", "Bold", "Compact", "System" };
 
 /* ------------------------------------------------------------ settings UI */
 static const char *row_label(int r)
@@ -2589,7 +2613,7 @@ static void row_value(int r, char *out, size_t cap)
     case ROW_CLOCK:     s = UI_CLOCK_NAMES[(unsigned)S.clock_mode % 3]; break;
     case ROW_GLOWCOL:   s = GLOWCOL_NAMES[(unsigned)S.glow_color % GLOWCOL_COUNT]; break;
     case ROW_BATTSTYLE: s = UI_BATT_NAMES[(unsigned)S.batt_style % 2]; break;
-    case ROW_LY_FONT:   s = UI_LY_FONT_NAMES[(unsigned)S.ly_font % 3]; break;
+    case ROW_LY_FONT:   s = UI_LY_FONT_NAMES[(unsigned)S.ly_font % 4]; break;
     case ROW_SEEK:      snprintf(out, cap, "%d s", S.seek_step); return;
     case ROW_SLEEP_TIMER: snprintf(out, cap, "%d min", S.sleep_minutes); return;
     default: break;
@@ -3407,7 +3431,7 @@ static void startup_load(C3D_RenderTarget *top, C3D_RenderTarget *bot)
             if (!audio_ok) snprintf(status_msg, sizeof status_msg, "No sound - dspfirm.cdc missing");
             break;
         case 1: flow_init(placeholder_png, placeholder_png_len); break;
-        case 2: lyrics_init(); break;
+        case 2: lyrics_init(); lyfont_init(); break;
         case 3: favorites_load(); break;
         case 4:
             set_dir(S.last_dir, NULL);
@@ -3770,6 +3794,7 @@ int main(void)
     if (S.resume && track_loaded && (audio_is_active() || resume_pending)) resume_save(cur_pos_ms());
     if (audio_ok) { audio_stop(); audio_exit(); }
     lyrics_exit();
+    lyfont_exit();
     if (ptm_ok) ptmuExit();
     if (mcu_ok) mcuHwcExit();
     art_shutdown();

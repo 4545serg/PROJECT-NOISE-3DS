@@ -1,3 +1,15 @@
+## Lyrics: gothic font, faster lookups
+
+- Lyrics screen only: new **Gothic** lyrics typeface (default; Settings > Lyrics > Lyrics font). Heavy, condensed, pointed capitals
+  drawn from a small embedded glyph atlas (`tools/make_lyfont.py` -> `source/lyfont_data.h`, `source/lyfont.c`). Lower case is shown as
+  capitals; a line with accents / other scripts (or too long) automatically uses the normal system font. Bold / Compact / System remain.
+- Removed the "Your music keeps playing" line; "No lyrics found" is now "LYRICS NOT FOUND".
+- One shared 9 s time budget per search (4 s connect, 6 s per request), instant cancel when the song changes, one reused HTTPS
+  connection, no second http:C attempt after libcurl, no duplicate LRCLIB title search, a single LRCMux request (skipped when LRCLIB
+  already said "not found"), no sleeps between providers, and the CA-failure retry is remembered for the session.
+- Cached / `.lrc` lyrics appear immediately (no thread hop); online results are shown first and written to the SD card afterwards.
+- Player, bottom screen, artwork, controls and playback are unchanged.
+
 ## Lyrics networking repair
 
 - Use devkitPro 3DS curl + mbedTLS for online lyrics before the legacy http:C path.

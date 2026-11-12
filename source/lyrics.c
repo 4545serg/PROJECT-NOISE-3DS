@@ -21,8 +21,11 @@
 #define LY_MAX_BODY   (192 * 1024)
 #define LY_MAX_FILE   (96 * 1024)
 #define LY_NF_DAYS    7
-#define HTTP_TIMEOUT_NS (7000000000ULL)
-#define HTTP_TOTAL_MS   18000
+#define HTTP_TIMEOUT_NS (5000000000ULL)
+#define HTTP_TOTAL_MS   8000
+#define HTTP_CONNECT_MS 4000L      /* connect + TLS handshake */
+#define HTTP_REQ_MS     6000L      /* one whole request */
+#define JOB_BUDGET_MS   9000       /* the whole online search for one song: after this it reports instead of waiting */
 #define USER_AGENT    "PROJECT-NOISE-3DS/1.2 (https://github.com/)"
 
 /* ------------------------------------------------------------------ data */
@@ -68,6 +71,15 @@ static u32           *g_soc_buf;
 /* optional settings from lyrics.cfg (never compiled in) */
 static char g_proxy[300], g_token[200];
 static bool g_insecure;
+static bool g_tls_relaxed;            /* worker only: the CA check failed once, so later requests skip the failed attempt */
+static CURL *g_ch;                    /* worker only: one handle reused, so the TLS connection stays open between requests */
+static u64   g_deadline;              /* worker only: end of the current job's time budget (osGetTime ms) */
+
+static long time_left_ms(void)
+{
+    const u64 now = osGetTime();
+    return g_deadline > now ? (long)(g_deadline - now) : 0;
+}
 
 /* ------------------------------------------------------------ text utils */
 static void norm(const char *in, char *out, size_t cap)    /* lower-case, brackets / punctuation removed */
@@ -707,14 +719,28 @@ static size_t curl_write_cb(char *ptr, size_t size, size_t nmemb, void *userdata
     return n;
 }
 
+typedef struct { int gen; } CurlCancel;
+
+static int curl_progress_cb(void *p, curl_off_t dt, curl_off_t dn, curl_off_t ut, curl_off_t un)
+{
+    (void)dt; (void)dn; (void)ut; (void)un;
+    const CurlCancel *cc = (const CurlCancel *)p;
+    return (g_quit || g_gen != cc->gen || time_left_ms() <= 0) ? 1 : 0;     /* non-zero aborts the transfer */
+}
+
 static int curl_get(const char *url, const char *token, int gen, char **out, size_t *outlen)
 {
     if (!g_curl_ok) return -1;
     *out = NULL;
     *outlen = 0;
 
-    CURL *c = curl_easy_init();
+    const long left = time_left_ms();
+    if (left < 400) return -1;                                  /* out of time: report instead of waiting */
+    if (!g_ch) g_ch = curl_easy_init();
+    else curl_easy_reset(g_ch);
+    CURL *c = g_ch;
     if (!c) return -1;
+    CurlCancel cancel = { gen };
 
     CurlBuffer b = {0};
     struct curl_slist *headers = NULL;
@@ -734,8 +760,11 @@ static int curl_get(const char *url, const char *token, int gen, char **out, siz
     curl_easy_setopt(c, CURLOPT_USERAGENT, USER_AGENT);
     curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(c, CURLOPT_MAXREDIRS, 4L);
-    curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT_MS, 6000L);
-    curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, HTTP_TOTAL_MS);
+    curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT_MS, left < HTTP_CONNECT_MS ? left : HTTP_CONNECT_MS);
+    curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, left < HTTP_REQ_MS ? left : HTTP_REQ_MS);
+    curl_easy_setopt(c, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(c, CURLOPT_XFERINFOFUNCTION, curl_progress_cb);
+    curl_easy_setopt(c, CURLOPT_XFERINFODATA, &cancel);
     curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, curl_write_cb);
     curl_easy_setopt(c, CURLOPT_WRITEDATA, &b);
     curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
@@ -751,7 +780,7 @@ static int curl_get(const char *url, const char *token, int gen, char **out, siz
     curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 2L);
     curl_easy_setopt(c, CURLOPT_CAINFO, "sdmc:/config/ssl/cacert.pem");
-    if (g_insecure) {
+    if (g_insecure || g_tls_relaxed) {
         curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 0L);
     }
@@ -762,17 +791,16 @@ static int curl_get(const char *url, const char *token, int gen, char **out, siz
     /* If CA verification is the only thing that failed, retry the same URL
      * with verification disabled. This specifically handles older 3DS CA
      * bundles while still using mbedTLS for modern TLS negotiation. */
-    if (rc != CURLE_OK && !g_insecure &&
-        (rc == CURLE_PEER_FAILED_VERIFICATION || rc == CURLE_SSL_CONNECT_ERROR)) {
+    if (rc != CURLE_OK && !g_insecure && !g_tls_relaxed &&
+        (rc == CURLE_PEER_FAILED_VERIFICATION || rc == CURLE_SSL_CONNECT_ERROR) && time_left_ms() > 1500) {
         free(b.data); b.data = NULL; b.len = b.cap = 0;
         curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 0L);
         rc = curl_easy_perform(c);
-        if (rc == CURLE_OK) curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code);
+        if (rc == CURLE_OK) { g_tls_relaxed = true; curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code); }
     }
 
-    curl_slist_free_all(headers);
-    curl_easy_cleanup(c);
+    curl_slist_free_all(headers);                                /* the handle itself stays open for the next request */
 
     if (g_quit || g_gen != gen) { free(b.data); return -2; }
     if (rc != CURLE_OK) { free(b.data); return -1; }
@@ -926,15 +954,14 @@ static int http_get(const char *url, const char *token, int gen, char **out, siz
 {
     /* Modern TLS path first. Native http:C remains available for older/local
      * endpoints and for environments where curl is not usable. */
-    int rc = curl_get(url, token, gen, out, outlen);
-    if (rc == 200 || rc == 404 || rc == 400 || rc == 429 || rc == 403 || rc == 500 || rc == 503 || rc == -2)
-        return rc;
+    if (g_curl_ok) return curl_get(url, token, gen, out, outlen);       /* no second, slower attempt through http:C */
     return native_http_get(url, token, gen, out, outlen);
 }
 
 static int run_get(const char *url, const char *token, int gen, const Query *q, bool trust, const char *src, Found *f)
 {
     char *body; size_t len;
+    if (time_left_ms() < 400) return -1;
     int rc = http_get(url, token, gen, &body, &len);
     if (rc == -2 || rc == -1) return rc;
     if (rc == 404 || rc == 400) return 0;
@@ -946,11 +973,10 @@ static int run_get(const char *url, const char *token, int gen, const Query *q, 
 
 static int try_lrclib(const LyTrack *t, const Query *q, int gen, Found *f)
 {
-    char a[400], ti[400], cl[400], raw[400], url[1100];
+    char a[400], ti[400], cl[400], url[1100];
     url_enc(t->artist, a, sizeof a);
     url_enc(t->title, ti, sizeof ti);
     url_enc(q->clean, cl, sizeof cl);
-    url_enc(q->title, raw, sizeof raw);
 
     int answered = 0, failed = 0;
 
@@ -968,16 +994,6 @@ static int try_lrclib(const LyTrack *t, const Query *q, int gen, Found *f)
     int r = run_get(url, NULL, gen, q, false, "LRCLIB", f);
     if (r == 1 || r == -2) return r;
     if (r == 0) answered++; else if (r < 0) failed++;
-
-    /* Some tagged files contain punctuation/parentheses that the search endpoint
-     * handles differently. Try the normalized title as a final LRCLIB query. */
-    if (strcmp(raw, cl) != 0) {
-        if (t->artist[0]) snprintf(url, sizeof url, "https://lrclib.net/api/search?artist_name=%s&track_name=%s", a, raw);
-        else snprintf(url, sizeof url, "https://lrclib.net/api/search?track_name=%s", raw);
-        r = run_get(url, NULL, gen, q, false, "LRCLIB", f);
-        if (r == 1 || r == -2) return r;
-        if (r == 0) answered++; else if (r < 0) failed++;
-    }
 
     /* LRCLIB's q search is intentionally broad and can recover tracks whose
      * artist/title fields contain unusual punctuation, featuring text, or
@@ -1020,14 +1036,6 @@ static int try_lrcmux(const LyTrack *t, const Query *q, int gen, Found *f)
     snprintf(url, sizeof url,
              "https://api.lrcmux.dev/compat/lrclib/api/get?artist_name=%s&track_name=%s&duration=%d",
              a, ti, q->dur_s);
-    int r = run_get(url, NULL, gen, q, false, "LRCMux", f);
-    if (r == 1 || r == -2) return r;
-
-    /* Search compatibility endpoint is intentionally the second request;
-     * avoid hammering either service with four LRCLIB queries in a row. */
-    snprintf(url, sizeof url,
-             "https://api.lrcmux.dev/compat/lrclib/api/search?artist_name=%s&track_name=%s",
-             a, ti);
     return run_get(url, NULL, gen, q, false, "LRCMux", f);
 }
 
@@ -1047,9 +1055,31 @@ static int try_ovh(const LyTrack *t, const Query *q, int gen, Found *f)
 }
 
 /* ---------------------------------------------------------------- worker */
-static void job_run(const LyTrack *t, const LyOptions *o, bool force, int gen, LyState *st, LyData *d)
+typedef struct { char *raw; bool synced; bool nf; } SaveJob;      /* disk writes are done AFTER the result is shown */
+
+static void save_job(const LyTrack *t, const LyOptions *o, SaveJob *sj)
+{
+    if (!o->auto_download) { free(sj->raw); return; }
+    char p[96];
+    if (sj->raw) {
+        cache_name(t, sj->synced ? "lrc" : "txt", p, sizeof p);
+        write_file(p, sj->raw);
+        if (sj->synced) {          /* portable .lrc beside the audio file, same convention as LRCGET */
+            char side[820];
+            sidecar_name(t, "lrc", side, sizeof side);
+            write_file(side, sj->raw);
+        }
+        free(sj->raw);
+    } else if (sj->nf) {
+        cache_name(t, "nf", p, sizeof p);
+        write_file(p, "-");
+    }
+}
+
+static void job_run(const LyTrack *t, const LyOptions *o, bool force, int gen, LyState *st, LyData *d, SaveJob *sj)
 {
     memset(d, 0, sizeof *d);
+    memset(sj, 0, sizeof *sj);
     if (cache_lookup(t, o, d)) { *st = LY_READY; return; }
     if (o->offline_only) { *st = LY_OFFLINE; return; }
     if (!o->auto_search && !force) { *st = LY_IDLE; return; }
@@ -1062,6 +1092,7 @@ static void job_run(const LyTrack *t, const LyOptions *o, bool force, int gen, L
     Query q;
     query_make(&q, t, o);
     if (!q.title[0]) { *st = LY_NOTFOUND; return; }
+    g_deadline = osGetTime() + JOB_BUDGET_MS;                 /* everything below shares this one time budget */
 
     Found f;
     memset(&f, 0, sizeof f);
@@ -1070,7 +1101,8 @@ static void job_run(const LyTrack *t, const LyOptions *o, bool force, int gen, L
     bool found = false;
     for (int i = 0; i < 4 && !found; i++) {
         if (i == 2 && !g_proxy[0]) continue;
-        if (i > 0) svcSleepThread(350 * 1000 * 1000LL);
+        if (i == 1 && answered > 0) continue;                   /* LRCLIB said "not here": its mirror will say the same */
+        if (time_left_ms() < 400) { failed++; break; }          /* out of time: report now */
         r = providers[i](t, &q, gen, &f);
         if (r == -2) { *st = LY_IDLE; return; }                 /* superseded: result is dropped anyway */
         if (r == 1) found = true; else if (r == 0) answered++; else failed++;
@@ -1078,22 +1110,8 @@ static void job_run(const LyTrack *t, const LyOptions *o, bool force, int gen, L
     if (found) {
         if (parse_lyrics(f.raw, d)) {
             snprintf(d->src, sizeof d->src, "%s", f.src);
-            if (o->auto_download) {
-                char p[96];
-                cache_name(t, d->synced ? "lrc" : "txt", p, sizeof p);
-                write_file(p, f.raw);
-
-                /* LRCGET's useful convention is to place a same-name .lrc
-                 * beside the audio file.  PROJECT NOISE keeps its private
-                 * hashed cache too, but also writes the portable sidecar so
-                 * another lyrics-aware player can reuse the download. */
-                if (d->synced) {
-                    char side[820];
-                    sidecar_name(t, "lrc", side, sizeof side);
-                    write_file(side, f.raw);
-                }
-            }
-            free(f.raw);
+            sj->raw = f.raw;                                    /* saved by the worker once the lyrics are on screen */
+            sj->synced = d->synced;
             *st = LY_READY;
             return;
         }
@@ -1102,7 +1120,7 @@ static void job_run(const LyTrack *t, const LyOptions *o, bool force, int gen, L
     }
     if (answered > 0) {
         *st = LY_NOTFOUND;
-        if (o->auto_download && failed == 0) { char p[96]; cache_name(t, "nf", p, sizeof p); write_file(p, "-"); }
+        sj->nf = (failed == 0);
     } else {
         *st = LY_ERROR;
     }
@@ -1116,11 +1134,12 @@ static void worker(void *arg)
         LightLock_Lock(&g_lk);
         if (g_job_valid) { t = g_job; o = g_job_opt; force = g_job_force; gen = g_job_gen; g_job_valid = false; have = true; }
         LightLock_Unlock(&g_lk);
-        if (!have) { svcSleepThread(40 * 1000 * 1000LL); continue; }
+        if (!have) { svcSleepThread(12 * 1000 * 1000LL); continue; }
 
         LyState st = LY_IDLE;
         LyData d;
-        job_run(&t, &o, force, gen, &st, &d);
+        SaveJob sj;
+        job_run(&t, &o, force, gen, &st, &d, &sj);
 
         LightLock_Lock(&g_lk);
         if (gen == g_gen) {
@@ -1130,7 +1149,9 @@ static void worker(void *arg)
             data_free(&d);
         }
         LightLock_Unlock(&g_lk);
+        save_job(&t, &o, &sj);                                  /* now that the screen has the lyrics */
     }
+    if (g_ch) { curl_easy_cleanup(g_ch); g_ch = NULL; }
 }
 
 /* -------------------------------------------------------------- public API */
@@ -1221,6 +1242,20 @@ void lyrics_request(const LyTrack *t, const LyOptions *o, bool force_online)
 {
     if (!g_inited) return;
     if (!force_online && (g_state == LY_READY || g_state == LY_LOADING) && !strcmp(g_key, t->path)) return;
+
+    {   /* a cached / .lrc copy is a couple of small SD reads: show it right now, no search at all */
+        LyData d;
+        memset(&d, 0, sizeof d);
+        if (cache_lookup(t, o, &d)) {
+            LightLock_Lock(&g_lk);
+            g_gen++;                                         /* drop any search still running for the previous song */
+            if (g_mb_full) { data_free(&g_mb_data); g_mb_full = false; }
+            g_job_valid = false;
+            LightLock_Unlock(&g_lk);
+            adopt(&d, LY_READY, t);
+            return;
+        }
+    }
 
     LightLock_Lock(&g_lk);
     g_gen++;                                         /* cancels whatever the worker is doing */
