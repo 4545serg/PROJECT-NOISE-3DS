@@ -16,16 +16,18 @@
 #include "noise.h"
 
 #define LY_DIR        DATA_DIR "/lyrics"
-#define LY_CFG        DATA_DIR "/lyrics.cfg"      /* optional: proxy=<url>  token=<secret>  insecure_tls=1 */
+#define LY_CFG        DATA_DIR "/lyrics.cfg"      /* optional: proxy=<url>  token=<secret>  verify_tls=1  insecure_tls=1 */
 #define LY_MAX_LINES  700
 #define LY_MAX_BODY   (192 * 1024)
 #define LY_MAX_FILE   (96 * 1024)
 #define LY_NF_DAYS    7
 #define HTTP_TIMEOUT_NS (5000000000ULL)
 #define HTTP_TOTAL_MS   8000
-#define HTTP_CONNECT_MS 4000L      /* connect + TLS handshake */
-#define HTTP_REQ_MS     6000L      /* one whole request */
-#define JOB_BUDGET_MS   9000       /* the whole online search for one song: after this it reports instead of waiting */
+#define HTTP_CONNECT_MS 6000L      /* connect + TLS handshake (an Old 3DS needs 2-4 s for the handshake alone) */
+#define HTTP_REQ_MS     8000L      /* one whole request */
+#define JOB_BUDGET_MS   12000      /* the whole online search for one song: after this it reports instead of waiting */
+#define WATCHDOG_MS     16000      /* main thread gives up on a worker that never answers (e.g. blocked in DNS) */
+#define LY_CACERT       "sdmc:/config/ssl/cacert.pem"
 #define USER_AGENT    "PROJECT-NOISE-3DS/1.2 (https://github.com/)"
 
 /* ------------------------------------------------------------------ data */
@@ -64,13 +66,15 @@ static int           g_mb_gen;
 static LyState       g_mb_state;
 static LyData        g_mb_data;
 static bool          g_ac_ok, g_http_ok, g_curl_ok, g_soc_ok, g_inited;
+static u64           g_req_ms;                 /* main thread: when the current LY_LOADING search started */
 static u32           *g_soc_buf;
 #define SOC_ALIGN      0x1000
-#define SOC_BUFSIZE    0x100000
+#define SOC_BUFSIZE    0x40000          /* 256 KB is plenty for a few small HTTPS requests and spares the Old 3DS heap */
 
 /* optional settings from lyrics.cfg (never compiled in) */
 static char g_proxy[300], g_token[200];
-static bool g_insecure;
+static bool g_insecure;                 /* lyrics.cfg insecure_tls=1 */
+static bool g_verify;                   /* lyrics.cfg verify_tls=1: check certificates against the CA bundle (slower) */
 static bool g_tls_relaxed;            /* worker only: the CA check failed once, so later requests skip the failed attempt */
 static CURL *g_ch;                    /* worker only: one handle reused, so the TLS connection stays open between requests */
 static u64   g_deadline;              /* worker only: end of the current job's time budget (osGetTime ms) */
@@ -82,7 +86,10 @@ static long time_left_ms(void)
 }
 
 /* ------------------------------------------------------------ text utils */
-static void norm(const char *in, char *out, size_t cap)    /* lower-case, brackets / punctuation removed */
+/* U+00C0..U+00FF folded to plain ASCII ('*' / '/' = no letter) */
+static const char FOLD_C3[65] = "AAAAAAACEEEEIIIIDNOOOOO*OUUUUYTsaaaaaaaceeeeiiiidnooooo/ouuuuyty";
+
+static void norm(const char *in, char *out, size_t cap)    /* lower-case, accents folded, brackets / punctuation removed */
 {
     size_t n = 0;
     int depth = 0;
@@ -91,6 +98,12 @@ static void norm(const char *in, char *out, size_t cap)    /* lower-case, bracke
         if (*p == '(' || *p == '[') { depth++; continue; }
         if (*p == ')' || *p == ']') { if (depth) depth--; continue; }
         if (depth) continue;
+        if (*p == 0xC3 && p[1] >= 0x80 && p[1] <= 0xBF) {
+            const char f = FOLD_C3[p[1] - 0x80];
+            p++;
+            if (f != '*' && f != '/') { out[n++] = (char)tolower((unsigned char)f); sp = false; }
+            continue;
+        }
         if (*p >= 0x80) { out[n++] = (char)*p; sp = false; }
         else if (isalnum(*p)) { out[n++] = (char)tolower(*p); sp = false; }
         else if (!sp) { out[n++] = ' '; sp = true; }
@@ -104,7 +117,27 @@ static void norm(const char *in, char *out, size_t cap)    /* lower-case, bracke
     }
 }
 
-static void clean_title(const char *in, char *out, size_t cap)   /* keeps case, drops (...) / [...] */
+static bool has_word(const char *hay, const char *w);
+
+/* "Song - Remastered 2011", "Song - Radio Edit", "Song - Single Version": the tail is a release note, not the title */
+static void strip_dash_suffix(char *s)
+{
+    char *d = NULL, *p = s;
+    while ((p = strstr(p, " - ")) != NULL) { d = p; p += 3; }
+    if (!d || d == s) return;
+    char low[160];
+    size_t i = 0;
+    for (const char *q = d + 3; *q && i + 1 < sizeof low; q++, i++) low[i] = (char)tolower((unsigned char)*q);
+    low[i] = 0;
+    static const char *const tail[] = { "remaster", "remastered", "version", "edit", "mix", "mono", "stereo", "single", "album",
+                                        "deluxe", "bonus", "explicit", "clean", "radio", "original", "soundtrack", "anniversary",
+                                        "feat", "ft", "featuring", "from", "theme" };
+    bool cut = isdigit((unsigned char)low[0]) && isdigit((unsigned char)low[1]);      /* "- 2011" */
+    for (size_t k = 0; k < sizeof tail / sizeof tail[0] && !cut; k++) cut = has_word(low, tail[k]);
+    if (cut) *d = 0;
+}
+
+static void clean_title(const char *in, char *out, size_t cap)   /* keeps case, drops (...) / [...] and release notes */
 {
     size_t n = 0;
     int depth = 0;
@@ -115,6 +148,23 @@ static void clean_title(const char *in, char *out, size_t cap)   /* keeps case, 
     }
     while (n && out[n - 1] == ' ') n--;
     out[n] = 0;
+    strip_dash_suffix(out);
+    n = strlen(out);
+    while (n && out[n - 1] == ' ') out[--n] = 0;
+    if (!out[0]) snprintf(out, cap, "%s", in);
+}
+
+/* "Drake; Future", "A feat. B", "A, B", "A x B"  ->  "Drake" / "A": the lead artist is what the databases index first */
+static void primary_artist(const char *in, char *out, size_t cap)
+{
+    snprintf(out, cap, "%s", in);
+    static const char *const seps[] = { ";", " feat. ", " feat ", " ft. ", " ft ", " featuring ", " with ", ", ", " x ", " X ", " / " };
+    for (size_t i = 0; i < sizeof seps / sizeof seps[0]; i++) {
+        char *f = strstr(out, seps[i]);
+        if (f && f != out) *f = 0;
+    }
+    size_t n = strlen(out);
+    while (n && isspace((unsigned char)out[n - 1])) out[--n] = 0;
     if (!out[0]) snprintf(out, cap, "%s", in);
 }
 
@@ -567,9 +617,10 @@ typedef struct {
 static void query_make(Query *q, const LyTrack *t, const LyOptions *o)
 {
     memset(q, 0, sizeof *q);
-    norm(t->title, q->title, sizeof q->title);
-    norm(t->artist, q->artist, sizeof q->artist);
     clean_title(t->title, q->clean, sizeof q->clean);
+    norm(q->clean, q->title, sizeof q->title);
+    if (!q->title[0]) norm(t->title, q->title, sizeof q->title);
+    norm(t->artist, q->artist, sizeof q->artist);
     const char *b = strrchr(t->path, '/');
     char tmp[400];
     snprintf(tmp, sizeof tmp, "%s %s", t->title, b ? b + 1 : t->path);
@@ -603,7 +654,9 @@ static int score_obj(const Query *q, const char *obj, const char *e, bool trust)
         for (int i = 0; i < N_VARIANTS; i++)                    /* no remix / cover / live ... unless the song is one */
             if (has_word(lo, VARIANTS[i]) && !has_word(q->ours, VARIANTS[i])) return -1;
 
-        norm(name, nn, sizeof nn);
+        char cn[200];
+        clean_title(name, cn, sizeof cn);
+        norm(cn, nn, sizeof nn);
         if (!strcmp(nn, q->title)) score += 50;
         else {
             size_t a = strlen(nn), b = strlen(q->title);
@@ -626,7 +679,8 @@ static int score_obj(const Query *q, const char *obj, const char *e, bool trust)
             if (diff < 0) diff = -diff;
             if (diff <= 2) score += 20;
             else if (diff <= 4) score += 10;
-            else if (diff > 8) return -1;
+            else if (diff > 25) return -1;                        /* a different recording (extended / live) */
+            else if (diff > 8) score -= 12;                       /* same song, other release: allowed but ranked lower */
         } else if (!q->artist[0]) {
             return -1;                                            /* title alone is too weak without a length */
         }
@@ -695,13 +749,14 @@ typedef struct {
     char *data;
     size_t len;
     size_t cap;
+    bool   truncated;          /* body hit LY_MAX_BODY: the complete objects received so far are still usable */
 } CurlBuffer;
 
 static size_t curl_write_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
 {
     CurlBuffer *b = (CurlBuffer *)userdata;
     size_t n = size * nmemb;
-    if (n > LY_MAX_BODY - b->len) return 0;
+    if (n > LY_MAX_BODY - b->len) { b->truncated = true; return 0; }         /* stop the transfer; keep what we have */
     if (b->len + n + 1 > b->cap) {
         size_t nc = b->cap ? b->cap : 16384;
         while (nc < b->len + n + 1) {
@@ -773,32 +828,37 @@ static int curl_get(const char *url, const char *token, int gen, char **out, siz
     curl_easy_setopt(c, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
     curl_easy_setopt(c, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
 
-    /* Prefer the CA bundle maintained by Luma/Universal-Updater. If it is
-     * unavailable or the old bundle cannot validate the current chain, retry
-     * once without peer verification. This is a read-only lyrics request; no
-     * credentials are sent to the public providers. */
-    curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 1L);
-    curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 2L);
-    curl_easy_setopt(c, CURLOPT_CAINFO, "sdmc:/config/ssl/cacert.pem");
-    if (g_insecure || g_tls_relaxed) {
-        curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 0L);
-        curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 0L);
-    }
+    curl_easy_setopt(c, CURLOPT_TCP_NODELAY, 1L);
+    curl_easy_setopt(c, CURLOPT_DNS_CACHE_TIMEOUT, 3600L);      /* one DNS lookup per host per session */
+    curl_easy_setopt(c, CURLOPT_ACCEPT_ENCODING, "");           /* gzip / deflate: lyrics JSON shrinks about 4x on the slow Wi-Fi */
+
+    /* TLS. Parsing the whole CA bundle takes several seconds on an Old 3DS and a missing bundle file makes libcurl fail
+     * outright (that used to end in a permanent "couldn't reach the server"), so: lyrics are public, read-only text and
+     * are fetched WITHOUT a certificate check unless a check is wanted (verify_tls=1) or a secret is being sent (a token
+     * for the optional service in lyrics.cfg). A wanted check uses SD:/config/ssl/cacert.pem and is skipped, not
+     * failed, when that file is missing. */
+    struct stat cast;
+    const bool have_ca = stat(LY_CACERT, &cast) == 0 && cast.st_size > 0;
+    const bool verify = !g_insecure && !g_tls_relaxed && have_ca && ((token && token[0]) || g_verify);
+    curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, verify ? 1L : 0L);
+    curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, verify ? 2L : 0L);
+    if (verify) curl_easy_setopt(c, CURLOPT_CAINFO, LY_CACERT);
 
     rc = curl_easy_perform(c);
     if (rc == CURLE_OK) curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code);
 
-    /* If CA verification is the only thing that failed, retry the same URL
-     * with verification disabled. This specifically handles older 3DS CA
-     * bundles while still using mbedTLS for modern TLS negotiation. */
-    if (rc != CURLE_OK && !g_insecure && !g_tls_relaxed &&
-        (rc == CURLE_PEER_FAILED_VERIFICATION || rc == CURLE_SSL_CONNECT_ERROR) && time_left_ms() > 1500) {
-        free(b.data); b.data = NULL; b.len = b.cap = 0;
+    /* a verified attempt that fails on the certificate / TLS: remember it and retry once unverified (not for secrets) */
+    const bool tls_err = rc == CURLE_PEER_FAILED_VERIFICATION || rc == CURLE_SSL_CONNECT_ERROR || rc == CURLE_SSL_CACERT_BADFILE ||
+                         rc == CURLE_SSL_CERTPROBLEM || rc == CURLE_SSL_CIPHER || rc == CURLE_SSL_ISSUER_ERROR;
+    if (verify && tls_err && !(token && token[0]) && time_left_ms() > 1500 && !g_quit && g_gen == gen) {
+        free(b.data); memset(&b, 0, sizeof b);
         curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 0L);
         rc = curl_easy_perform(c);
         if (rc == CURLE_OK) { g_tls_relaxed = true; curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code); }
     }
+    /* an oversized body was cut on purpose: the complete objects before the cut are still good */
+    if (rc == CURLE_WRITE_ERROR && b.truncated && b.len > 0) { rc = CURLE_OK; code = 200; }
 
     curl_slist_free_all(headers);                                /* the handle itself stays open for the next request */
 
@@ -973,23 +1033,25 @@ static int run_get(const char *url, const char *token, int gen, const Query *q, 
 
 static int try_lrclib(const LyTrack *t, const Query *q, int gen, Found *f)
 {
-    char a[400], ti[400], cl[400], url[1100];
+    char a[400], a1[400], cl[400], url[1100], lead[160];
+    primary_artist(t->artist, lead, sizeof lead);
     url_enc(t->artist, a, sizeof a);
-    url_enc(t->title, ti, sizeof ti);
+    url_enc(lead, a1, sizeof a1);
     url_enc(q->clean, cl, sizeof cl);
 
     int answered = 0, failed = 0;
 
-    /* Exact lookup is the strongest match: artist + title + duration. */
+    /* Exact lookup is the strongest match: artist + title + duration (LRCLIB allows +-2 s). */
     if (t->artist[0] && t->duration_ms) {
-        snprintf(url, sizeof url, "https://lrclib.net/api/get?artist_name=%s&track_name=%s&duration=%d", a, ti, q->dur_s);
+        snprintf(url, sizeof url, "https://lrclib.net/api/get?artist_name=%s&track_name=%s&duration=%d", a, cl, q->dur_s);
         int r = run_get(url, NULL, gen, q, false, "LRCLIB", f);
         if (r == 1 || r == -2) return r;
         if (r == 0) answered++; else if (r < 0) failed++;
+        if (r < 0 && time_left_ms() < 1500) return -1;
     }
 
-    /* Search with the cleaned human title. */
-    if (t->artist[0]) snprintf(url, sizeof url, "https://lrclib.net/api/search?artist_name=%s&track_name=%s", a, cl);
+    /* Search with the cleaned human title and the lead artist (tags like "A; B" / "A feat. B" are not indexed that way). */
+    if (t->artist[0]) snprintf(url, sizeof url, "https://lrclib.net/api/search?artist_name=%s&track_name=%s", a1, cl);
     else snprintf(url, sizeof url, "https://lrclib.net/api/search?track_name=%s", cl);
     int r = run_get(url, NULL, gen, q, false, "LRCLIB", f);
     if (r == 1 || r == -2) return r;
@@ -1000,7 +1062,7 @@ static int try_lrclib(const LyTrack *t, const Query *q, int gen, Found *f)
      * metadata that does not match the structured search exactly.  We still
      * run the normal candidate scorer before accepting anything. */
     char qterm[700];
-    snprintf(qterm, sizeof qterm, "%s %s", t->artist, q->clean);
+    snprintf(qterm, sizeof qterm, "%s %s", lead, q->clean);
     char qenc[800];
     url_enc(qterm, qenc, sizeof qenc);
     snprintf(url, sizeof url, "https://lrclib.net/api/search?q=%s", qenc);
@@ -1029,21 +1091,22 @@ static int try_lrcmux(const LyTrack *t, const Query *q, int gen, Found *f)
      * multiple lyric backends. This is a useful independent fallback when
      * lrclib.net itself is slow/rate-limited. The compatibility endpoint
      * deliberately returns the same fields our LRCLIB parser already knows. */
-    char a[400], ti[400], url[1100];
-    url_enc(t->artist, a, sizeof a);
-    url_enc(t->title, ti, sizeof ti);
+    char a[400], cl[400], url[1100], lead[160];
+    primary_artist(t->artist, lead, sizeof lead);
+    url_enc(lead, a, sizeof a);
+    url_enc(q->clean, cl, sizeof cl);
 
-    snprintf(url, sizeof url,
-             "https://api.lrcmux.dev/compat/lrclib/api/get?artist_name=%s&track_name=%s&duration=%d",
-             a, ti, q->dur_s);
+    if (t->artist[0]) snprintf(url, sizeof url, "https://lrcmux.dev/api/search?artist_name=%s&track_name=%s", a, cl);
+    else snprintf(url, sizeof url, "https://lrcmux.dev/api/search?track_name=%s", cl);
     return run_get(url, NULL, gen, q, false, "LRCMux", f);
 }
 
 static int try_ovh(const LyTrack *t, const Query *q, int gen, Found *f)
 {
     if (!t->artist[0]) return 0;
-    char a[400], cl[400], url[900];
-    url_enc(t->artist, a, sizeof a);
+    char a[400], cl[400], url[900], lead[160];
+    primary_artist(t->artist, lead, sizeof lead);
+    url_enc(lead, a, sizeof a);
     url_enc(q->clean, cl, sizeof cl);
     snprintf(url, sizeof url, "https://api.lyrics.ovh/v1/%s/%s", a, cl);
     int r = run_get(url, NULL, gen, q, true, "lyrics.ovh", f);
@@ -1166,6 +1229,7 @@ static void load_cfg(void)
         if (!strncmp(line, "proxy=", 6) && !strncmp(line + 6, "http", 4)) snprintf(g_proxy, sizeof g_proxy, "%s", line + 6);
         else if (!strncmp(line, "token=", 6)) snprintf(g_token, sizeof g_token, "%s", line + 6);
         else if (!strncmp(line, "insecure_tls=", 13)) g_insecure = atoi(line + 13) != 0;
+        else if (!strncmp(line, "verify_tls=", 11)) g_verify = atoi(line + 11) != 0;
     }
     fclose(f);
 }
@@ -1183,19 +1247,19 @@ void lyrics_init(void)
      * work. This was missing from the earlier lyrics implementation and can
      * produce exactly the generic "couldn't reach lyrics servers" screen even
      * though the console has working Wi-Fi. */
-    g_soc_buf = (u32 *)memalign(SOC_ALIGN, SOC_BUFSIZE);
-    if (g_soc_buf) g_soc_ok = R_SUCCEEDED(socInit(g_soc_buf, SOC_BUFSIZE));
-    if (!g_soc_ok) {
-        free(g_soc_buf);
-        g_soc_buf = NULL;
+    for (u32 sz = SOC_BUFSIZE; sz >= 0x10000 && !g_soc_ok; sz >>= 1) {
+        g_soc_buf = (u32 *)memalign(SOC_ALIGN, sz);
+        if (!g_soc_buf) continue;
+        g_soc_ok = R_SUCCEEDED(socInit(g_soc_buf, sz));
+        if (!g_soc_ok) { free(g_soc_buf); g_soc_buf = NULL; }
     }
 
     g_curl_ok = g_soc_ok && (curl_global_init(CURL_GLOBAL_DEFAULT) == CURLE_OK);
     /* Keep http:C initialized as a real fallback even when curl is available. */
     g_http_ok = R_SUCCEEDED(httpcInit(0));
     g_quit = false;
-    g_thread = threadCreate(worker, NULL, 64 * 1024, 0x30, 1, false);
-    if (!g_thread) g_thread = threadCreate(worker, NULL, 64 * 1024, 0x3F, -2, false);
+    g_thread = threadCreate(worker, NULL, 128 * 1024, 0x30, 1, false);
+    if (!g_thread) g_thread = threadCreate(worker, NULL, 128 * 1024, 0x3F, -2, false);
 }
 
 void lyrics_exit(void)
@@ -1263,6 +1327,7 @@ void lyrics_request(const LyTrack *t, const LyOptions *o, bool force_online)
     g_job = *t; g_job_opt = *o; g_job_force = force_online; g_job_gen = g_gen; g_job_valid = true;
     LightLock_Unlock(&g_lk);
     adopt(NULL, LY_LOADING, t);
+    g_req_ms = osGetTime();
 }
 
 void lyrics_pump(void)
@@ -1275,6 +1340,13 @@ void lyrics_pump(void)
         memset(&g_mb_data, 0, sizeof g_mb_data);
         g_state = g_mb_state;
         g_mb_full = false;
+    } else if (osGetTime() - g_req_ms > WATCHDOG_MS) {
+        /* The worker never answered (blocked in DNS / a dead connection / no thread at all). Never leave the screen on
+         * "searching": drop that job (a late result is ignored) and report; the user can search again with A. */
+        g_gen++;
+        g_job_valid = false;
+        if (g_mb_full) { data_free(&g_mb_data); g_mb_full = false; }
+        g_state = LY_ERROR;
     }
     LightLock_Unlock(&g_lk);
 }

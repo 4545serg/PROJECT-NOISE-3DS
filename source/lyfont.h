@@ -4,7 +4,8 @@
 
 /* Gothic lyrics typeface: a small pre-rendered glyph atlas (tools/make_lyfont.py -> lyfont_data.h) drawn as
  * tinted sprites. It is used ONLY by the lyrics screen; the rest of the app keeps the system font.
- * Capitals, digits and common punctuation are available (lower case is shown as capitals). */
+ * Blackletter lower case, capitals, digits and common punctuation are available; a line with any other
+ * character (accents, other scripts) is left to the system font. */
 
 bool  lyfont_init(void);                     /* main thread, outside a frame; false = unavailable (system font is used) */
 void  lyfont_exit(void);

@@ -1,3 +1,12 @@
+## Lyrics: reliable lookup, blackletter font
+
+- **Lookup fixes**: a missing `SD:/config/ssl/cacert.pem` made libcurl fail every request (reported as "couldn't reach the server") - certificates are now only checked when asked for (`verify_tls=1`) or when a service token is sent; replies bigger than the 192 KB buffer (LRCLIB search can return 20 full lyrics) are cut and still used instead of failing; replies are gzip-compressed; DNS is cached; the worker thread has a 128 KB stack and a smaller socket buffer (Old 3DS heap).
+- **Never stuck on "searching"**: 12 s search budget (6 s connect / 8 s per request, an Old 3DS TLS handshake alone takes 2-4 s) plus a 16 s main-thread watchdog.
+- **LYRICS NOT FOUND** replaces "Couldn't reach the lyrics servers" (a failed lookup is not remembered, so it is retried).
+- **Better matches**: titles are cleaned (`- Remastered 2011`, `- Radio Edit`, `feat.`, brackets), accents are folded (Beyonce = Beyoncé), multi-artist tags search by the lead artist, LRCLIB exact lookup uses the clean title, LRCMux now uses its LRCLIB-compatible `lrcmux.dev/api` search, and a few seconds of length difference only lowers the rank instead of rejecting the song.
+- **Lyrics font**: new blackletter typeface (lower case + capitals, digits, punctuation; heavy pointed stems, diamond feet, faceted bowls) drawn with one broad-nib model so every letter has the same weight and slant (`tools/make_lyfont.py`). Even spacing measured from the glyph ink; larger lines on the lyrics screen. Lines it cannot draw (accents, other scripts, too small) still use the system font. Same 512x256 A8 atlas as before.
+- Nothing else changed.
+
 ## Lyrics: gothic font, faster lookups
 
 - Lyrics screen only: new **Gothic** lyrics typeface (default; Settings > Lyrics > Lyrics font). Heavy, condensed, pointed capitals

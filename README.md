@@ -123,25 +123,28 @@ EQ and the last folder - and is restored on the next launch. The last song and i
 resumes.
 
 **Lyrics** - tap **LYRICS** (next to the search bar) while a song is loaded. Lyrics are found in this order:
-`<song>.lrc` next to the file, the SD cache `SD:/3ds/PROJECT_NOISE/lyrics/`, then online: LRCLIB, LRCMux (LRCLIB-compatible multi-provider fallback), an optional
+`<song>.lrc` next to the file, the SD cache `SD:/3ds/PROJECT_NOISE/lyrics/`, then online: LRCLIB (exact lookup, then search), LRCMux (multi-provider fallback), an optional
 external service, and lyrics.ovh. Artist / title come from the file's tags (ID3, Vorbis comments, WAV INFO), or
 from an `Artist - Title` file name. Remixes, covers, live and karaoke versions are rejected unless the song itself is
-one, and the length must match. Synchronized (LRC) lyrics highlight the current line and scroll with the song;
+one, and the length must roughly match. Title / artist are cleaned before searching (`- Remastered`, `feat.`, brackets, accents,
+`A; B` credits). Synchronized (LRC) lyrics highlight the current line and scroll with the song;
 plain lyrics scroll with the D-pad. Searching runs on a background thread, so playback never waits for it.
 Settings > Lyrics: *Automatic search* (look online when the lyrics screen opens; off = press A), *Auto download*
 (keep results in the SD cache; off = shown only), *Offline only* (cache and `.lrc` files only), *Prefer synced*,
 *Clear lyrics cache*. Songs nobody has are remembered for 7 days so they are not searched again.
 
-PROJECT NOISE uses the devkitPro 3DS curl + mbedTLS stack for online lyrics, with the native http:C path retained as a fallback. The app initializes the 3DS SOC socket service before libcurl, matching working 3DS HTTPS applications. Building now requires the `3ds-curl` and `3ds-mbedtls` devkitPro portlibs. The curl path first uses the Luma/Universal-Updater CA bundle at `SD:/config/ssl/cacert.pem`; if that bundle cannot validate the public lyrics server, the read-only request retries without peer verification.
+PROJECT NOISE uses the devkitPro 3DS curl + mbedTLS stack for online lyrics (the native http:C path is only a fallback). The app initializes the 3DS SOC socket service before libcurl. Building requires the `3ds-curl` and `3ds-mbedtls` devkitPro portlibs.
 
-The native http:C fallback may still fail on modern HTTPS servers, but the primary curl/mbedTLS path is designed specifically to avoid that limitation. If both network paths fail, the lyrics screen says it
-could not reach the servers; an optional service can still be configured by creating
+Lyrics are public, read-only text, so they are fetched **without** a certificate check by default: parsing the whole CA bundle takes several seconds on an Old 3DS and a missing bundle used to make every search fail. Set `verify_tls=1` in `lyrics.cfg` to check certificates against `SD:/config/ssl/cacert.pem` (skipped, not failed, when the file is missing). A service `token` is only ever sent over a verified connection. Replies are requested gzip-compressed and an oversized reply is cut instead of failing.
+
+A search never stays on "searching": it has a shared 12 s budget and the screen gives up after 16 s even if the network stack is stuck. Whenever nothing could be found - or the servers could not be reached - the lyrics screen simply shows **LYRICS NOT FOUND** (press A to search again; only real "nobody has it" answers are remembered for 7 days). An optional service can be configured by creating
 `SD:/3ds/PROJECT_NOISE/lyrics.cfg`:
 
 ```
 proxy=https://your-service.example/lyrics     # plain http:// also works
 token=optional-secret                           # sent as "Authorization: Bearer <token>"
-insecure_tls=0                                  # 1 = skip certificate checks (not recommended)
+verify_tls=0                                    # 1 = check certificates against SD:/config/ssl/cacert.pem (slower)
+insecure_tls=0                                  # 1 = never check certificates, even for the service token (not recommended)
 ```
 
 The service receives `GET <proxy>?artist_name=..&track_name=..&duration=<seconds>&synced=0|1` and answers with

@@ -2059,7 +2059,7 @@ static bool ly_gothic_line(const char *s, float x, float yc, float sc, Rgb col, 
     if (S.ly_font != 0 || !lyfont_ok() || !lyfont_can(s)) return false;
     const float w = lyfont_width(s, sc);
     if (w > maxw) sc *= maxw / w;
-    if (sc < 0.34f) return false;
+    if (sc < 0.42f) return false;
     if (glow > 0.01f && !S.saver) {                                   /* soft halo: four offset copies */
         static const float ox[4] = { 1.5f, -1.5f, 0.0f, 0.0f }, oy[4] = { 0.0f, 0.0f, 1.5f, -1.5f };
         const u32 g = C(mix_rgb(th_bg, th_glow, (int)(110.0f * glow)));
@@ -2077,7 +2077,7 @@ static const char *ly_state_msg(LyState st, const char **sub)
     case LY_NOTFOUND: *sub = "Press A to search again";             return "LYRICS NOT FOUND";
     case LY_OFFLINE:  *sub = "Turn off Offline only to search";     return "No cached lyrics (offline only)";
     case LY_NONET:    *sub = "Connect to Wi-Fi, then press A";      return "No Wi-Fi connection";
-    case LY_ERROR:    *sub = "Press A to try again";                return "Couldn't reach the lyrics servers";
+    case LY_ERROR:    *sub = "Press A to search again";             return "LYRICS NOT FOUND";
     default:          *sub = "";                                    return "";
     }
 }
@@ -2111,7 +2111,7 @@ static void draw_lyrics_top(void)
     if (!ready) {
         const char *sub;
         const char *msg = ly_state_msg(st, &sub);
-        if (!ly_gothic_line(msg, 200, 100, 0.62f, th_tx, 0.0f, 370)) ly_draw_text(msg, 200, 92, 0.62f, cText, C2D_AlignCenter, 370);
+        if (!ly_gothic_line(msg, 200, 100, 0.74f, th_tx, 0.0f, 370)) ly_draw_text(msg, 200, 92, 0.62f, cText, C2D_AlignCenter, 370);
         if (sub[0]) ly_draw_text(sub, 200, 124, 0.42f, cDim, C2D_AlignCenter, 370);
         if (st == LY_LOADING) {
             const float ts = pv_tsec();
@@ -2131,21 +2131,21 @@ static void draw_lyrics_top(void)
             const float d = (float)i - ly_pos, ad = fabsf(d);
             const float a = 1.0f - ad * 0.27f;
             if (a < 0.08f) continue;
-            const float cy = 118.0f + d * 25.0f;
+            const float cy = 118.0f + d * 25.0f + 3.0f * fmaxf(-1.0f, fminf(1.0f, d));   /* a little air around the current line */
             const char *tx = lyrics_text(i);
             if (i == idx) {
-                if (!ly_gothic_line(tx, 200, cy, 0.64f, mix_rgb(th_acc, th_tx, 60), 0.45f, 372.0f)) {
+                if (!ly_gothic_line(tx, 200, cy, 0.78f, mix_rgb(th_acc, th_tx, 60), 0.45f, 372.0f)) {
                     const float sc = fit_scale(tx, 0.70f, 372.0f);
                     draw_text_glow(tx, 200, cy - 14.0f * sc, sc, C2D_AlignCenter, mix_rgb(th_acc, th_tx, 60), th_glow, 0.45f, 1.0f, 372);
                 }
             } else {
                 const Rgb dim = mix_rgb(mix_rgb(th_tx, th_bg, 55), th_bg, (int)((1.0f - a) * 255.0f));
-                if (!ly_gothic_line(tx, 200, cy, 0.46f, dim, 0.0f, 372.0f))
+                if (!ly_gothic_line(tx, 200, cy, 0.60f, dim, 0.0f, 372.0f))
                     draw_text(tx, 200, cy - 14.0f * 0.46f, 0.46f, Ca(mix_rgb(th_tx, th_bg, 55), a), C2D_AlignCenter, 372);
             }
         }
     } else {
-        const float max_off = n > 8 ? (float)(n - 8) : 0.0f;
+        const float max_off = n > 7 ? (float)(n - 7) : 0.0f;
         /* Plain text is advanced gently so long lyrics remain readable without
          * requiring the bottom screen to become a separate lyrics UI. */
         if (max_off > 0.0f) {
@@ -2154,17 +2154,17 @@ static void draw_lyrics_top(void)
             if (ly_goal > max_off) ly_goal = max_off;
         } else ly_goal = 0.0f;
         if (S.saver) ly_pos = ly_goal; else ly_pos += (ly_goal - ly_pos) * 0.08f;
-        for (int i = (int)floorf(ly_pos); i < n && i < (int)ly_pos + 10; i++) {
-            const float y = 38.0f + ((float)i - ly_pos) * 21.0f;
+        for (int i = (int)floorf(ly_pos); i < n && i < (int)ly_pos + 9; i++) {
+            const float y = 38.0f + ((float)i - ly_pos) * 23.0f;
             float a = fminf((y - 28.0f) / 12.0f, (206.0f - y) / 12.0f);
             if (a <= 0.02f) continue;
             if (a > 1.0f) a = 1.0f;
-            if (!ly_gothic_line(lyrics_text(i), 200, y + 9.0f, 0.46f, mix_rgb(th_bg, th_tx, (int)(a * 255.0f)), 0.0f, 366.0f))
+            if (!ly_gothic_line(lyrics_text(i), 200, y + 10.0f, 0.60f, mix_rgb(th_bg, th_tx, (int)(a * 255.0f)), 0.0f, 366.0f))
                 ly_draw_text(lyrics_text(i), 200, y, 0.50f, Ca(th_tx, a), C2D_AlignCenter, 366);
         }
-        if (n > 8) {                                                   /* scroll position */
+        if (n > 7) {                                                   /* scroll position */
             rrect(391, 36, 4, 164, 2, 0.08f, cTrk);
-            const float th = 164.0f * 8.0f / (float)n, ty = 36.0f + (164.0f - th) * (ly_pos / max_off);
+            const float th = 164.0f * 7.0f / (float)n, ty = 36.0f + (164.0f - th) * (ly_pos / max_off);
             rrect(391, ty, 4, th < 10.0f ? 10.0f : th, 2, 0.09f, cAcc);
         }
     }

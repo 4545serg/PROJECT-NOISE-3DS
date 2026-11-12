@@ -91,7 +91,9 @@ static int decode(const char *s, int *out)
             if (c == '[') c = '(';
             if (c == ']') c = ')';
             if (c == '_') c = '-';
-            one[0] = (char)toupper((unsigned char)c);
+            if (c == '{') c = '(';
+            if (c == '}') c = ')';
+            one[0] = c;                                          /* lower case stays lower case */
             rep = one;
         } else if (p[0] == 0xE2 && p[1] == 0x80) {
             const unsigned char k = p[2];
@@ -141,9 +143,10 @@ void lyfont_draw(const char *s, float x, float yc, float sc, u32 color, u32 alig
 
     C2D_ImageTint tint;
     C2D_PlainImageTint(&tint, color, 1.0f);
-    const float top = yc - 22.5f * sc;
+    const float top = yc - LYF_YC * sc;
     for (int i = 0; i < n; i++) {
-        if (g[i] != 0) C2D_DrawImageAt(g_img[g[i]], x, top, z, &tint, sc, sc);
-        x += (float)lyf_adv[g[i]] * sc;
+        const float a = (float)lyf_adv[g[i]];
+        if (g[i] != 0) C2D_DrawImageAt(g_img[g[i]], x + (a - (float)LYF_CW) * 0.5f * sc, top, z, &tint, sc, sc);   /* ink is centred in its cell */
+        x += a * sc;
     }
 }
