@@ -2052,16 +2052,8 @@ static void ly_draw_text(const char *s, float x, float y, float sc, u32 color, u
 }
 
 /* Gothic lyrics typeface (Settings > Lyrics > Lyrics font). Lyrics screen only: drawn from the glyph atlas in
- * lyfont.c. The visible lyric stack switches together to the system font when a line contains unsupported
- * Unicode or is too long, keeping characters intact without mixing typefaces. yc = vertical centre. */
-static bool ly_gothic_fits(const char *s, float sc, float maxw)
-{
-    if (!lyfont_ok() || !lyfont_can(s)) return false;
-    const float w = lyfont_width(s, sc);
-    if (w > maxw && w > 0.0f) sc *= maxw / w;
-    return sc >= 0.42f;
-}
-
+ * lyfont.c; a line it cannot show (accents, other scripts, too long) returns false and the caller uses the
+ * system font, so no lyric is ever lost. yc = vertical centre of the letters. */
 static bool ly_gothic_line(const char *s, float x, float yc, float sc, Rgb col, float glow, float maxw)
 {
     if (S.ly_font != 0 || !lyfont_ok() || !lyfont_can(s)) return false;
@@ -2069,10 +2061,8 @@ static bool ly_gothic_line(const char *s, float x, float yc, float sc, Rgb col, 
     if (w > maxw) sc *= maxw / w;
     if (sc < 0.42f) return false;
     if (glow > 0.01f && !S.saver) {                                   /* soft halo: four offset copies */
-        static const float ox[4] = { 1.0f, -1.0f, 0.0f, 0.0f }, oy[4] = { 0.0f, 0.0f, 1.0f, -1.0f };
-        /* Keep the halo translucent. The old RGB-only color made every offset
-         * copy fully opaque, producing four visible ghost images per lyric. */
-        const u32 g = Ca(mix_rgb(th_bg, th_glow, 150), 0.16f * glow);
+        static const float ox[4] = { 1.5f, -1.5f, 0.0f, 0.0f }, oy[4] = { 0.0f, 0.0f, 1.5f, -1.5f };
+        const u32 g = C(mix_rgb(th_bg, th_glow, (int)(110.0f * glow)));
         for (int i = 0; i < 4; i++) lyfont_draw(s, x + ox[i], yc + oy[i], sc, g, C2D_AlignCenter, text_z - 0.01f);
     }
     lyfont_draw(s, x, yc, sc, C(col), C2D_AlignCenter, text_z);
@@ -2135,35 +2125,23 @@ static void draw_lyrics_top(void)
         const float goal = (float)idx;
         if (S.saver || fabsf(goal - ly_pos) > 6.0f) ly_pos = goal; else ly_pos += (goal - ly_pos) * 0.20f;
         const int c0 = (int)floorf(ly_pos + 0.5f);
-        /* Select one face for the entire visible stack. If any visible line needs
-         * Unicode fallback, render all seven with the system font rather than
-         * mixing unrelated typefaces line by line. */
-        bool gothic_stack = (S.ly_font == 0 && lyfont_ok());
-        for (int k = -3; k <= 3 && gothic_stack; k++) {
-            const int i = c0 + k;
-            if (i >= 0 && i < n && !ly_gothic_fits(lyrics_text(i), 0.50f, 372.0f)) gothic_stack = false;
-        }
         for (int k = -3; k <= 3; k++) {
             const int i = c0 + k;
             if (i < 0 || i >= n) continue;
             const float d = (float)i - ly_pos, ad = fabsf(d);
             const float a = 1.0f - ad * 0.27f;
             if (a < 0.08f) continue;
-            /* A fixed 28.5 px baseline pitch plus smaller glyph scales keeps
-             * the seven-line stack inside the lyric viewport without collisions. */
-            const float cy = 118.0f + d * 28.5f;
+            const float cy = 118.0f + d * 25.0f + 3.0f * fmaxf(-1.0f, fminf(1.0f, d));   /* a little air around the current line */
             const char *tx = lyrics_text(i);
             if (i == idx) {
-                if (gothic_stack) {
-                    ly_gothic_line(tx, 200, cy, 0.66f, mix_rgb(th_acc, th_tx, 60), 0.28f, 372.0f);
-                } else {
-                    const float sc = fit_scale(tx, 0.60f, 372.0f);
-                    draw_text_glow(tx, 200, cy - 14.0f * sc, sc, C2D_AlignCenter, mix_rgb(th_acc, th_tx, 60), th_glow, 0.28f, 1.0f, 372);
+                if (!ly_gothic_line(tx, 200, cy, 0.78f, mix_rgb(th_acc, th_tx, 60), 0.45f, 372.0f)) {
+                    const float sc = fit_scale(tx, 0.70f, 372.0f);
+                    draw_text_glow(tx, 200, cy - 14.0f * sc, sc, C2D_AlignCenter, mix_rgb(th_acc, th_tx, 60), th_glow, 0.45f, 1.0f, 372);
                 }
             } else {
                 const Rgb dim = mix_rgb(mix_rgb(th_tx, th_bg, 55), th_bg, (int)((1.0f - a) * 255.0f));
-                if (gothic_stack) ly_gothic_line(tx, 200, cy, 0.50f, dim, 0.0f, 372.0f);
-                else draw_text(tx, 200, cy - 14.0f * 0.40f, 0.40f, Ca(mix_rgb(th_tx, th_bg, 55), a), C2D_AlignCenter, 372);
+                if (!ly_gothic_line(tx, 200, cy, 0.60f, dim, 0.0f, 372.0f))
+                    draw_text(tx, 200, cy - 14.0f * 0.46f, 0.46f, Ca(mix_rgb(th_tx, th_bg, 55), a), C2D_AlignCenter, 372);
             }
         }
     } else {
@@ -2176,18 +2154,13 @@ static void draw_lyrics_top(void)
             if (ly_goal > max_off) ly_goal = max_off;
         } else ly_goal = 0.0f;
         if (S.saver) ly_pos = ly_goal; else ly_pos += (ly_goal - ly_pos) * 0.08f;
-        const int first_line = (int)floorf(ly_pos);
-        const int last_line = first_line + 9 < n ? first_line + 9 : n;
-        bool gothic_stack = (S.ly_font == 0 && lyfont_ok());
-        for (int i = first_line; i < last_line && gothic_stack; i++)
-            if (!ly_gothic_fits(lyrics_text(i), 0.60f, 366.0f)) gothic_stack = false;
-        for (int i = first_line; i < last_line; i++) {
+        for (int i = (int)floorf(ly_pos); i < n && i < (int)ly_pos + 9; i++) {
             const float y = 38.0f + ((float)i - ly_pos) * 23.0f;
             float a = fminf((y - 28.0f) / 12.0f, (206.0f - y) / 12.0f);
             if (a <= 0.02f) continue;
             if (a > 1.0f) a = 1.0f;
-            if (gothic_stack) ly_gothic_line(lyrics_text(i), 200, y + 10.0f, 0.60f, mix_rgb(th_bg, th_tx, (int)(a * 255.0f)), 0.0f, 366.0f);
-            else ly_draw_text(lyrics_text(i), 200, y, 0.50f, Ca(th_tx, a), C2D_AlignCenter, 366);
+            if (!ly_gothic_line(lyrics_text(i), 200, y + 10.0f, 0.60f, mix_rgb(th_bg, th_tx, (int)(a * 255.0f)), 0.0f, 366.0f))
+                ly_draw_text(lyrics_text(i), 200, y, 0.50f, Ca(th_tx, a), C2D_AlignCenter, 366);
         }
         if (n > 7) {                                                   /* scroll position */
             rrect(391, 36, 4, 164, 2, 0.08f, cTrk);
