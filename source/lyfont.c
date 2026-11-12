@@ -77,35 +77,57 @@ static int glyph_of(char c)
     return (p && c) ? (int)(p - LYF_CHARS) : -1;
 }
 
-/* UTF-8 -> glyph indices. Returns the count, or -1 when something has no glyph. */
+/* UTF-8 -> glyph indices. Known typographic punctuation is normalized to the
+ * matching atlas glyph. Other valid Unicode is rejected as a whole line so the
+ * caller can render it with citro2d's system font without losing characters. */
 static int decode(const char *s, int *out)
 {
     int n = 0;
-    for (const unsigned char *p = (const unsigned char *)s; *p; ) {
+    const unsigned char *p = (const unsigned char *)s;
+    while (*p) {
         const char *rep = NULL;
         char one[2] = { 0, 0 };
         if (*p < 0x80) {
             char c = (char)*p++;
             if (c == '\t' || c == '\r' || c == '\n') c = ' ';
             if (c == '`') c = '\'';
-            if (c == '[') c = '(';
-            if (c == ']') c = ')';
+            if (c == '[' || c == '{') c = '(';
+            if (c == ']' || c == '}') c = ')';
             if (c == '_') c = '-';
-            if (c == '{') c = '(';
-            if (c == '}') c = ')';
-            one[0] = c;                                          /* lower case stays lower case */
+            one[0] = c;
             rep = one;
-        } else if (p[0] == 0xE2 && p[1] == 0x80) {
-            const unsigned char k = p[2];
-            if (k == 0x98 || k == 0x99) rep = "'";
-            else if (k == 0x9C || k == 0x9D) rep = "\"";
-            else if (k == 0x93 || k == 0x94) rep = "-";
-            else if (k == 0xA6) rep = "...";
-            else return -1;
-            p += 3;
-        } else if (p[0] == 0xC2 && p[1] == 0xA0) { rep = " "; p += 2; }
-        else return -1;                                         /* accents, other scripts: system font */
+        } else {
+            /* Validate sequence length and continuation bytes before reading
+             * them. Lyrics can come from network/cache data, so malformed UTF-8
+             * must never make the decoder read beyond its terminating NUL. */
+            unsigned cp;
+            int bytes;
+            if (p[0] >= 0xC2 && p[0] <= 0xDF) {
+                if (!p[1] || (p[1] & 0xC0) != 0x80) return -1;
+                cp = ((unsigned)(p[0] & 0x1F) << 6) | (unsigned)(p[1] & 0x3F);
+                bytes = 2;
+            } else if (p[0] >= 0xE0 && p[0] <= 0xEF) {
+                if (!p[1] || !p[2] || (p[1] & 0xC0) != 0x80 || (p[2] & 0xC0) != 0x80) return -1;
+                if ((p[0] == 0xE0 && p[1] < 0xA0) || (p[0] == 0xED && p[1] >= 0xA0)) return -1;
+                cp = ((unsigned)(p[0] & 0x0F) << 12) | ((unsigned)(p[1] & 0x3F) << 6) | (unsigned)(p[2] & 0x3F);
+                bytes = 3;
+            } else if (p[0] >= 0xF0 && p[0] <= 0xF4) {
+                if (!p[1] || !p[2] || !p[3] || (p[1] & 0xC0) != 0x80 || (p[2] & 0xC0) != 0x80 || (p[3] & 0xC0) != 0x80) return -1;
+                if ((p[0] == 0xF0 && p[1] < 0x90) || (p[0] == 0xF4 && p[1] >= 0x90)) return -1;
+                cp = ((unsigned)(p[0] & 0x07) << 18) | ((unsigned)(p[1] & 0x3F) << 12) | ((unsigned)(p[2] & 0x3F) << 6) | (unsigned)(p[3] & 0x3F);
+                bytes = 4;
+            } else return -1;
 
+            switch (cp) {
+            case 0x00A0: rep = " "; break;                         /* non-breaking space */
+            case 0x2018: case 0x2019: case 0x201A: case 0x201B: rep = "'"; break;
+            case 0x201C: case 0x201D: case 0x201E: case 0x201F: rep = "\""; break;
+            case 0x2010: case 0x2011: case 0x2012: case 0x2013: case 0x2014: case 0x2015: rep = "-"; break;
+            case 0x2026: rep = "..."; break;
+            default: return -1;                                     /* preserve via system-font fallback */
+            }
+            p += bytes;
+        }
         for (; *rep; rep++) {
             const int g = glyph_of(*rep);
             if (g < 0 || n >= LYF_MAXG) return -1;
