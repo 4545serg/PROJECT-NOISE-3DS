@@ -1,3 +1,10 @@
+## Custom keyboard, keyboard font, smoother library scrolling
+
+- **Gothic on-screen keyboard** replaces the system keyboard for song search (touch, or D-pad + A / B backspace / X shift / Y or START search / SELECT cancel). Same dark rounded keys, accent rim and glow as the rest of the app; letters + digits/symbols pages, one-shot shift, hold Backspace to repeat, 40-character limit, same "not blank" rule as before.
+- **Settings > Look > Keyboard font**: Gothic (default), Bold, System, Compact. Saved as `kb_font` in `settings.cfg` (older files simply get the default).
+- **Library scrolling**: title/artist/length tags are no longer read from the SD card (plus an MP3 frame probe) on the draw path while you scroll; they load one per frame after the selection has been still for ~0.2 s, selected song first and its neighbours after. The top-screen cover flow uses wider perspective strips only while the covers are moving (about half the draw calls); the settled view is unchanged.
+- Nothing else changed.
+
 ## Lyrics: reliable lookup, blackletter font
 
 - **Lookup fixes**: a missing `SD:/config/ssl/cacert.pem` made libcurl fail every request (reported as "couldn't reach the server") - certificates are now only checked when asked for (`verify_tls=1`) or when a service token is sent; replies bigger than the 192 KB buffer (LRCLIB search can return 20 full lyrics) are cut and still used instead of failing; replies are gzip-compressed; DNS is cached; the worker thread has a 128 KB stack and a smaller socket buffer (Old 3DS heap).

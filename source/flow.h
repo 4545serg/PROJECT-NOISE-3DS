@@ -35,4 +35,6 @@ bool flow_color(int idx, u32 *rgb);            /* ambient colour (0xRRGGBB) of a
 
 /* items[i] is the entry with index base+i.  pos = fractional centre index,
  * appear = 0..1 (0 collapses the side covers into the centre), bg = background colour lookup. */
+/* Moving covers are drawn with wider perspective strips (about half the draw calls); the settled view keeps the fine ones. */
+void flow_set_fast(bool fast);
 void flow_draw(const FlowItem *items, int n, int base, float pos, float appear, FlowBgFn bg);

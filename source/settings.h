@@ -37,7 +37,9 @@ typedef struct {
     bool ly_download;                /* lyrics: keep downloaded lyrics in the SD cache */
     bool ly_offline;                 /* lyrics: never use the network, cache only */
     bool ly_sync;                    /* lyrics: prefer synchronized (LRC) lyrics */
+    bool ly_animated;                /* lyrics: animate line transitions and scrolling */
     int  ly_font;                    /* lyrics text style: 0 = Gothic, 1 = Bold, 2 = Compact, 3 = System */
+    int  kb_font;                    /* on-screen keyboard keys + text: 0 = Gothic, 1 = Bold, 2 = System, 3 = Compact */
     int  ui_ver;                     /* settings-file UI version (2 = Noise blue default theme) */
     char last_dir[512];              /* last browsed folder               */
 } Settings;

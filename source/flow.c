@@ -36,6 +36,7 @@ static Slot     g_slot[SLOTS];
 static unsigned g_tick;
 static C3D_Tex  g_ph;
 static bool     g_ph_ok;
+static bool     g_fast;                    /* covers are moving: use wide strips */
 
 /* ---- shared with the loader thread (guarded by g_lk) ---- */
 static LightLock     g_lk;
@@ -326,7 +327,7 @@ static void draw_item(const FlowItem *it, float o, float appear, FlowBgFn bgf)
 
     C2D_Image img;
     img.tex = it->tex;
-    int n = (t < 0.02f) ? 1 : (int)ceilf(w / 3.0f);
+    int n = (t < 0.02f) ? 1 : (int)ceilf(w / (g_fast ? 8.0f : 3.0f));
     if (n < 1) n = 1;
     float refl = REFLECT;
 
@@ -376,6 +377,8 @@ static void draw_item(const FlowItem *it, float o, float appear, FlowBgFn bgf)
         bg_bot = next_bot;
     }
 }
+
+void flow_set_fast(bool fast) { g_fast = fast; }
 
 void flow_draw(const FlowItem *items, int n, int base, float pos, float appear, FlowBgFn bg)
 {
