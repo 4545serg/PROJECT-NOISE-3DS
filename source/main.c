@@ -57,7 +57,7 @@ enum {                         /* settings rows, grouped in four pages */
     ROW_PRESET, ROW_OLED, ROW_GLOWCOL, ROW_GLOW, ROW_DYN, ROW_KB_FONT, ROW_WALLPAPER, /* Look    */
     ROW_EQMAN, ROW_EQPRE, ROW_B0, ROW_B1, ROW_B2, ROW_B3, ROW_B4,              /* Audio   */
     ROW_DISPLAY, ROW_FADE, ROW_INFO, ROW_RESUME, ROW_SEEK, ROW_LID,            /* Player  */
-    ROW_LY_SEARCH, ROW_LY_DL, ROW_LY_OFFLINE, ROW_LY_SYNC, ROW_LY_ANIM, ROW_LY_FONT, ROW_LY_CLEAR, /* Lyrics */
+    ROW_LY_SEARCH, ROW_LY_DL, ROW_LY_OFFLINE, ROW_LY_SYNC, ROW_LY_ANIM, ROW_LY_STYLE, ROW_LY_FONT, ROW_LY_CLEAR, /* Lyrics */
     ROW_CLOCK, ROW_BATT, ROW_BATTSTYLE, ROW_SAVER,                             /* General */
     ROW_SLEEP_ENABLE, ROW_SLEEP_TIMER, ROW_GUIDE, ROW_EXIT,
     SET_ROWS
@@ -70,10 +70,10 @@ static const int   ROWS_LOOK[]    = { ROW_OLED, ROW_GLOWCOL, ROW_GLOW, ROW_DYN, 
 static const int   ROWS_PLAYER[]  = { ROW_DISPLAY, ROW_FADE, ROW_INFO, ROW_RESUME, ROW_SEEK, ROW_LID };
 static const int   ROWS_GENERAL[] = { ROW_CLOCK, ROW_BATT, ROW_BATTSTYLE, ROW_SAVER, ROW_SLEEP_ENABLE, ROW_SLEEP_TIMER, ROW_GUIDE, ROW_EXIT };
 static const int   ROWS_SETUP[]   = { ROW_PRESET, ROW_GLOW, ROW_CLOCK, ROW_BATT };
-static const int   ROWS_LYRICS[]  = { ROW_LY_SEARCH, ROW_LY_DL, ROW_LY_OFFLINE, ROW_LY_SYNC, ROW_LY_ANIM, ROW_LY_FONT, ROW_LY_CLEAR };
+static const int   ROWS_LYRICS[]  = { ROW_LY_SEARCH, ROW_LY_DL, ROW_LY_OFFLINE, ROW_LY_SYNC, ROW_LY_ANIM, ROW_LY_STYLE, ROW_LY_FONT, ROW_LY_CLEAR };
 static const int  *CARD_ROWS[CARD_COUNT] = { ROWS_LOOK, NULL, ROWS_PLAYER, ROWS_GENERAL, ROWS_SETUP, ROWS_LYRICS };
-static const int   CARD_LEN[CARD_COUNT]  = { 5, 0, 6, 8, 4, 7 };
-static const float CARD_ROWH[CARD_COUNT] = { 29.0f, 0.0f, 25.0f, 19.5f, 25.0f, 25.0f };
+static const int   CARD_LEN[CARD_COUNT]  = { 5, 0, 6, 8, 4, 8 };
+static const float CARD_ROWH[CARD_COUNT] = { 29.0f, 0.0f, 25.0f, 19.5f, 25.0f, 20.0f };
 #define PAGES 5
 static const int   PAGE_CARD[PAGES]      = { CARD_LOOK, CARD_SOUND, CARD_PLAYER, CARD_LYRICS, CARD_GENERAL };
 static const int   TAB_FIRST[PAGES]      = { ROW_OLED, ROW_EQMAN, ROW_DISPLAY, ROW_LY_SEARCH, ROW_CLOCK };
@@ -867,7 +867,7 @@ static bool is_switch_row(int r)
            r == ROW_LY_SEARCH || r == ROW_LY_DL || r == ROW_LY_OFFLINE || r == ROW_LY_SYNC || r == ROW_LY_ANIM;
 }
 static bool is_band_row(int r)   { return r >= ROW_B0 && r <= ROW_B4; }
-static bool is_choice_row(int r) { return r == ROW_PRESET || r == ROW_EQPRE || r == ROW_CLOCK || r == ROW_GLOW || r == ROW_FADE || r == ROW_DISPLAY || r == ROW_WALLPAPER || r == ROW_SEEK || r == ROW_SLEEP_TIMER || r == ROW_GLOWCOL || r == ROW_BATTSTYLE || r == ROW_LY_FONT || r == ROW_KB_FONT; }
+static bool is_choice_row(int r) { return r == ROW_PRESET || r == ROW_EQPRE || r == ROW_CLOCK || r == ROW_GLOW || r == ROW_FADE || r == ROW_DISPLAY || r == ROW_WALLPAPER || r == ROW_SEEK || r == ROW_SLEEP_TIMER || r == ROW_GLOWCOL || r == ROW_BATTSTYLE || r == ROW_LY_STYLE || r == ROW_LY_FONT || r == ROW_KB_FONT; }
 
 static int card_pos(int card, int row)            /* index of `row` inside a card, or -1 */
 {
@@ -1125,6 +1125,8 @@ static void set_adjust(int dir)
         S.ly_sync = !S.ly_sync;
     } else if (set_row == ROW_LY_ANIM) {
         S.ly_animated = !S.ly_animated;
+    } else if (set_row == ROW_LY_STYLE) {
+        S.ly_anim_style = (S.ly_anim_style + dir + 4) % 4;
     } else if (set_row == ROW_LY_FONT) {
         S.ly_font = (S.ly_font + dir + 4) % 4;
     } else if (set_row == ROW_KB_FONT) {
@@ -2172,23 +2174,45 @@ static void draw_lyrics_top(void)
     } else if (synced) {
         const int idx = lyrics_index_at(pos);
         const float goal = (float)idx;
-        if (!S.ly_animated || S.saver || fabsf(goal - ly_pos) > 6.0f) ly_pos = goal; else ly_pos += (goal - ly_pos) * 0.20f;
+        if (!S.ly_animated || S.saver || S.ly_anim_style != 0 || fabsf(goal - ly_pos) > 6.0f)
+            ly_pos = goal;
+        else
+            ly_pos += (goal - ly_pos) * 0.20f;
         const int c0 = (int)floorf(ly_pos + 0.5f);
+        int elapsed_ms = idx >= 0 ? (int)pos - lyrics_time(idx) : 0;
+        if (elapsed_ms < 0) elapsed_ms = 0;
+        const float phase = (float)elapsed_ms / 1000.0f;
+        float active_alpha = 1.0f;
+        float active_scale = 0.78f;
+        float active_y = 0.0f;
+        if (S.ly_animated && !S.saver && idx >= 0) {
+            if (S.ly_anim_style == 1) {                         /* Fade */
+                active_alpha = fminf(1.0f, 0.20f + (float)elapsed_ms / 300.0f);
+            } else if (S.ly_anim_style == 2) {                  /* Pulse */
+                active_scale += 0.035f * sinf(phase * 7.0f);
+            } else if (S.ly_anim_style == 3) {                  /* Bounce */
+                if (elapsed_ms < 420)
+                    active_y = -7.0f * sinf((float)elapsed_ms / 420.0f * 3.14159265f);
+            }
+        }
         for (int k = -3; k <= 3; k++) {
             const int i = c0 + k;
             if (i < 0 || i >= n) continue;
             const float d = (float)i - ly_pos, ad = fabsf(d);
             const float a = 1.0f - ad * 0.27f;
             if (a < 0.08f) continue;
-            const float cy = 118.0f + d * 25.0f + 3.0f * fmaxf(-1.0f, fminf(1.0f, d));   /* a little air around the current line */
+            const float cy = 118.0f + d * 25.0f + 3.0f * fmaxf(-1.0f, fminf(1.0f, d));
             const char *tx = lyrics_text(i);
             if (i == idx) {
-                if (!ly_gothic_line(tx, 200, cy, 0.78f, mix_rgb(th_acc, th_tx, 60), 0.45f, 372.0f)) {
-                    const float sc = fit_scale(tx, 0.70f, 372.0f);
+                const Rgb active_rgb = mix_rgb(th_bg, mix_rgb(th_acc, th_tx, 60), (int)(active_alpha * 255.0f));
+                const u32 active_col = Ca(active_rgb, active_alpha);
+                const float line_y = cy + active_y;
+                if (!ly_gothic_line(tx, 200, line_y, active_scale, active_rgb, 0.45f * active_alpha, 372.0f)) {
+                    const float sc = fit_scale(tx, 0.70f, 372.0f) * (active_scale / 0.78f);
                     if (S.ly_font == 0)
-                        draw_text_glow(tx, 200, cy - 14.0f * sc, sc, C2D_AlignCenter, mix_rgb(th_acc, th_tx, 60), th_glow, 0.45f, 1.0f, 372);
+                        draw_text_glow(tx, 200, line_y - 14.0f * sc, sc, C2D_AlignCenter, active_rgb, th_glow, 0.45f * active_alpha, active_alpha, 372);
                     else
-                        ly_draw_text(tx, 200, cy - 14.0f * ly_font_scale(sc), sc, C(mix_rgb(th_acc, th_tx, 60)), C2D_AlignCenter, 372);
+                        ly_draw_text(tx, 200, line_y - 14.0f * ly_font_scale(sc), sc, active_col, C2D_AlignCenter, 372);
                 }
             } else {
                 const Rgb dim = mix_rgb(mix_rgb(th_tx, th_bg, 55), th_bg, (int)((1.0f - a) * 255.0f));
@@ -2616,6 +2640,7 @@ static const char *UI_DISPLAY_NAMES[4]   = { "Cover", "LED Spectrum", "Scope", "
 static const char *UI_BATT_NAMES[2]      = { "Icon", "Percent" };
 static const char *UI_CLOCK_NAMES[3]     = { "Off", "12-hour", "24-hour" };
 static const char *UI_LY_FONT_NAMES[4]   = { "Gothic", "Bold", "Compact", "System" };
+static const char *UI_LY_ANIM_NAMES[4]   = { "Slide", "Fade", "Pulse", "Bounce" };
 static const char *UI_KB_FONT_NAMES[4]   = { "Gothic", "Bold", "System", "Compact" };
 
 /* ------------------------------------------------------------ settings UI */
@@ -2647,6 +2672,7 @@ static const char *row_label(int r)
     case ROW_LY_OFFLINE:   return "Offline only";
     case ROW_LY_SYNC:      return "Prefer synced";
     case ROW_LY_ANIM:      return "Animated lyrics";
+    case ROW_LY_STYLE:     return "Animation style";
     case ROW_LY_FONT:      return "Lyrics font";
     case ROW_KB_FONT:      return "Keyboard font";
     case ROW_LY_CLEAR:     return "Clear lyrics cache";
@@ -2668,6 +2694,7 @@ static void row_value(int r, char *out, size_t cap)
     case ROW_CLOCK:     s = UI_CLOCK_NAMES[(unsigned)S.clock_mode % 3]; break;
     case ROW_GLOWCOL:   s = GLOWCOL_NAMES[(unsigned)S.glow_color % GLOWCOL_COUNT]; break;
     case ROW_BATTSTYLE: s = UI_BATT_NAMES[(unsigned)S.batt_style % 2]; break;
+    case ROW_LY_STYLE:  s = UI_LY_ANIM_NAMES[(unsigned)S.ly_anim_style % 4]; break;
     case ROW_LY_FONT:   s = UI_LY_FONT_NAMES[(unsigned)S.ly_font % 4]; break;
     case ROW_KB_FONT:   s = UI_KB_FONT_NAMES[(unsigned)S.kb_font % 4]; break;
     case ROW_SEEK:      snprintf(out, cap, "%d s", S.seek_step); return;
