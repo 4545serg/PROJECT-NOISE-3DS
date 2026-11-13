@@ -30,6 +30,8 @@ static volatile int    g_req;            /* 0 none, 1 play, 2 stop */
 static volatile float  g_req_frac = -1.0f;   /* >= 0: start this far into the file (seek) */
 static volatile u32    g_req_ms;
 static volatile bool   g_want_pause;
+static volatile bool   g_suspend;      /* HOME menu / sleep: the audio thread must not touch the DSP */
+static volatile bool   g_suspended;    /* ... and has confirmed it is idle */
 static volatile int    g_want_vol = 80;
 static volatile bool   g_active, g_finished, g_error;
 static volatile u32    g_rate, g_played; /* Hz, frames played so far */
@@ -453,6 +455,16 @@ static void audio_thread(void *arg)
 {
     (void)arg;
     while (!g_quit) {
+        if (g_suspend) {                       /* parked: pause the channel once, then leave the DSP alone */
+            if (!g_suspended) {
+                if (!applied_pause) { ndspChnSetPaused(0, true); applied_pause = true; }
+                g_suspended = true;
+            }
+            svcSleepThread(10 * 1000 * 1000LL);
+            continue;
+        }
+        if (g_suspended) g_suspended = false;   /* resumed: the normal pause logic below restores the state */
+
         if (g_req) handle_request();
 
         if (g_want_pause != applied_pause) {
@@ -547,6 +559,15 @@ void audio_stop(void)
     LightLock_Unlock(&g_lock);
     g_active = false;
 }
+
+/* Park the audio thread before the app is suspended (HOME) or put to sleep; waits briefly for it to confirm. */
+void audio_suspend(void)
+{
+    if (!ready) return;
+    g_suspend = true;
+    for (int i = 0; i < 40 && !g_suspended; i++) svcSleepThread(5 * 1000 * 1000LL);   /* up to 200 ms */
+}
+void audio_unsuspend(void) { g_suspend = false; }
 
 void audio_pause(void)  { g_want_pause = true; }
 void audio_resume(void) { g_want_pause = false; }

@@ -11,6 +11,8 @@ void audio_exit(void);
 void audio_play(const char *path, u32 audio_start);   /* async: starts a new track */
 void audio_seek(const char *path, u32 audio_start, float frac, u32 start_ms);   /* frac 0..1 */
 void audio_pause(void);
+void audio_suspend(void);                  /* park the audio thread (HOME / sleep); audio_unsuspend() undoes it */
+void audio_unsuspend(void);
 void audio_resume(void);
 void audio_stop(void);
 

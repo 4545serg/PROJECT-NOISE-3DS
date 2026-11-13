@@ -1,3 +1,8 @@
+## HOME button / sleep safety
+
+- Pressing HOME (or sleeping) now pauses the music, parks the audio thread so it makes no DSP calls while the app is away, allows sleep, and gives back the screen-control service; coming back resumes the song if it was playing.
+- The screen-control service is only opened while the lid is closed during playback.
+
 ## Play with the lid closed
 
 - **Settings > Player > Play lid closed** (default off, saved as `lid_play`): while a song is playing the console is kept from sleeping, so music continues with the lid shut; L / R skip still works. Screens are turned off while closed and restored on opening.

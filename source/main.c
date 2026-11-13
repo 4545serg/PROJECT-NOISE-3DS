@@ -880,16 +880,29 @@ static void eq_push(void) { audio_set_eq(S.eq); }
 /* Sleep is only blocked while a song is actually playing and "Play lid closed" is on; paused / stopped
  * (or the setting off) lets the console sleep normally when the lid closes. */
 static bool lid_block_sleep(void) { return S.lid_play && audio_is_active() && !audio_is_paused(); }
-static void apply_lid(void) { aptSetSleepAllowed(!lid_block_sleep()); }
+static int  lid_sleep_state = -1;                 /* last value given to the system: 1 = sleep allowed, 0 = blocked */
+static void apply_lid(void)
+{
+    int want = lid_block_sleep() ? 0 : 1;
+    if (want == lid_sleep_state) return;
+    aptSetSleepAllowed(want != 0);
+    lid_sleep_state = want;
+}
 
 /* With sleep blocked the lid no longer switches the screens off by itself, so do it here to save battery. */
 static bool lcd_ok = false, lcd_off = false;
-static void lcd_set(bool off)
+static void lcd_set(bool off)                     /* the LCD service is only held while the screens are off */
 {
-    if (!lcd_ok || off == lcd_off) return;
-    if (off) GSPLCD_PowerOffBacklight(GSPLCD_SCREEN_BOTH);
-    else     GSPLCD_PowerOnBacklight(GSPLCD_SCREEN_BOTH);
-    lcd_off = off;
+    if (off == lcd_off) return;
+    if (off) {
+        if (!lcd_ok) lcd_ok = R_SUCCEEDED(gspLcdInit());
+        if (!lcd_ok) return;
+        GSPLCD_PowerOffBacklight(GSPLCD_SCREEN_BOTH);
+        lcd_off = true;
+    } else {
+        if (lcd_ok) { GSPLCD_PowerOnBacklight(GSPLCD_SCREEN_BOTH); gspLcdExit(); lcd_ok = false; }
+        lcd_off = false;
+    }
 }
 static bool lid_closed(void)
 {
@@ -914,16 +927,22 @@ static void sleep_timer_cancel(void)
 static void apt_lid_hook(APT_HookType hook, void *param)
 {
     (void)param;
-    /* Sleep (lid / power) and suspend (HOME button) both take the DSP and the GPU away from the app: stop feeding
-     * the audio engine first, and pick up again when we are brought back. */
+    /* Sleep (lid / power) and suspend (HOME button) take the DSP and the GPU away from the app: pause the music,
+     * park the audio thread so it makes no DSP calls meanwhile, and let the system sleep / switch freely. */
     if (hook == APTHOOK_ONSLEEP || hook == APTHOOK_ONSUSPEND) {
-        lcd_off = false;                          /* the system handles the screens across sleep / suspend */
+        if (lcd_ok) { gspLcdExit(); lcd_ok = false; }   /* give the LCD service back; the system handles the screens now */
+        lcd_off = false;
         if (!paused_for_sleep) {
             paused_for_sleep = audio_is_active() && !audio_is_paused();
             if (paused_for_sleep) audio_pause();
         }
+        audio_suspend();
+        aptSetSleepAllowed(true);
+        lid_sleep_state = 1;
     } else if (hook == APTHOOK_ONWAKEUP || hook == APTHOOK_ONRESTORE) {
+        audio_unsuspend();
         if (paused_for_sleep) { audio_resume(); paused_for_sleep = false; }
+        lid_sleep_state = -1;                     /* re-apply the sleep rule on the next frame */
     }
 }
 static void favorites_load(void)
@@ -3868,7 +3887,6 @@ int main(void)
 
     mcu_ok = R_SUCCEEDED(mcuHwcInit());      /* battery percentage (optional) */
     ptm_ok = R_SUCCEEDED(ptmuInit());        /* charging state / fallback level (optional) */
-    lcd_ok = R_SUCCEEDED(gspLcdInit());      /* backlight control for lid-closed playback (optional) */
 
     art_set_default(placeholder_png, placeholder_png_len);
     art_queue(NULL, 0);                 /* show the logo cover until a song with art plays */
@@ -4173,7 +4191,6 @@ int main(void)
     if (audio_ok) { audio_stop(); audio_exit(); }
     lyrics_exit();
     lyfont_exit();
-    if (lcd_ok) gspLcdExit();
     if (ptm_ok) ptmuExit();
     if (mcu_ok) mcuHwcExit();
     art_shutdown();
