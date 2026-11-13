@@ -21,6 +21,7 @@
 #include "browser.h"
 #include "flow.h"
 #include "lyrics.h"
+#include "lyfont.h"
 #include "meta.h"
 #include "placeholder.h"
 #include "search.h"
@@ -53,10 +54,10 @@
 #define EQ_TRK_Y1  201         /* ... -12 dB at the bottom           */
 
 enum {                         /* settings rows, grouped in four pages */
-    ROW_PRESET, ROW_OLED, ROW_GLOWCOL, ROW_GLOW, ROW_DYN, ROW_WALLPAPER,       /* Look    */
+    ROW_PRESET, ROW_OLED, ROW_GLOWCOL, ROW_GLOW, ROW_DYN, ROW_KB_FONT, ROW_WALLPAPER, /* Look    */
     ROW_EQMAN, ROW_EQPRE, ROW_B0, ROW_B1, ROW_B2, ROW_B3, ROW_B4,              /* Audio   */
     ROW_DISPLAY, ROW_FADE, ROW_INFO, ROW_RESUME, ROW_SEEK,                     /* Player  */
-    ROW_LY_SEARCH, ROW_LY_DL, ROW_LY_OFFLINE, ROW_LY_SYNC, ROW_LY_CLEAR,       /* Lyrics  */
+    ROW_LY_SEARCH, ROW_LY_DL, ROW_LY_OFFLINE, ROW_LY_SYNC, ROW_LY_ANIM, ROW_LY_FONT, ROW_LY_CLEAR, /* Lyrics */
     ROW_CLOCK, ROW_BATT, ROW_BATTSTYLE, ROW_SAVER,                             /* General */
     ROW_SLEEP_ENABLE, ROW_SLEEP_TIMER, ROW_GUIDE, ROW_EXIT,
     SET_ROWS
@@ -65,17 +66,17 @@ enum {                         /* settings rows, grouped in four pages */
 /* "Cards" are lists of settings rows drawn as one inset panel. Cards 0 and 2 are the Look and General
  * tabs (the Sound tab has its own layout); CARD_SETUP is the single combined page of the first-run setup. */
 enum { CARD_LOOK, CARD_SOUND, CARD_PLAYER, CARD_GENERAL, CARD_SETUP, CARD_LYRICS, CARD_COUNT };
-static const int   ROWS_LOOK[]    = { ROW_PRESET, ROW_OLED, ROW_GLOWCOL, ROW_GLOW, ROW_DYN, ROW_WALLPAPER };
+static const int   ROWS_LOOK[]    = { ROW_OLED, ROW_GLOWCOL, ROW_GLOW, ROW_DYN, ROW_KB_FONT };
 static const int   ROWS_PLAYER[]  = { ROW_DISPLAY, ROW_FADE, ROW_INFO, ROW_RESUME, ROW_SEEK };
 static const int   ROWS_GENERAL[] = { ROW_CLOCK, ROW_BATT, ROW_BATTSTYLE, ROW_SAVER, ROW_SLEEP_ENABLE, ROW_SLEEP_TIMER, ROW_GUIDE, ROW_EXIT };
 static const int   ROWS_SETUP[]   = { ROW_PRESET, ROW_GLOW, ROW_CLOCK, ROW_BATT };
-static const int   ROWS_LYRICS[]  = { ROW_LY_SEARCH, ROW_LY_DL, ROW_LY_OFFLINE, ROW_LY_SYNC, ROW_LY_CLEAR };
+static const int   ROWS_LYRICS[]  = { ROW_LY_SEARCH, ROW_LY_DL, ROW_LY_OFFLINE, ROW_LY_SYNC, ROW_LY_ANIM, ROW_LY_FONT, ROW_LY_CLEAR };
 static const int  *CARD_ROWS[CARD_COUNT] = { ROWS_LOOK, NULL, ROWS_PLAYER, ROWS_GENERAL, ROWS_SETUP, ROWS_LYRICS };
-static const int   CARD_LEN[CARD_COUNT]  = { 6, 0, 5, 8, 4, 5 };
-static const float CARD_ROWH[CARD_COUNT] = { 26.0f, 0.0f, 28.0f, 19.5f, 25.0f, 28.0f };
+static const int   CARD_LEN[CARD_COUNT]  = { 5, 0, 5, 8, 4, 7 };
+static const float CARD_ROWH[CARD_COUNT] = { 29.0f, 0.0f, 28.0f, 19.5f, 25.0f, 25.0f };
 #define PAGES 5
 static const int   PAGE_CARD[PAGES]      = { CARD_LOOK, CARD_SOUND, CARD_PLAYER, CARD_LYRICS, CARD_GENERAL };
-static const int   TAB_FIRST[PAGES]      = { ROW_PRESET, ROW_EQMAN, ROW_DISPLAY, ROW_LY_SEARCH, ROW_CLOCK };
+static const int   TAB_FIRST[PAGES]      = { ROW_OLED, ROW_EQMAN, ROW_DISPLAY, ROW_LY_SEARCH, ROW_CLOCK };
 static const char *PAGE_NAMES[PAGES]     = { "Look", "Audio", "Player", "Lyrics", "General" };
 #define TAB_W   60             /* settings tab strip: PAGES segments of TAB_W px starting at x = 10 */
 
@@ -186,6 +187,7 @@ static float     ctrl_flash_x = 0.0f;
 #define CTRL_FLASH_FRAMES 10
 
 static void      toast(const char *msg);
+static void      kb_begin(void);
 static void      apply_lid(void);
 static void      show_favorites(void);
 static void      favorites_save(void);
@@ -203,14 +205,21 @@ static void vis_update(void)
 {
     float b[AUDIO_VIS_BANDS], w[AUDIO_VIS_WAVE];
     const bool live = audio_ok && audio_get_vis(b, w);
+    /* Keep the analyser responsive, but deliberately tame the attack/release so normal
+     * volume changes do not turn into large visual spikes. This is intentionally cheap
+     * scalar smoothing for the Old 3DS; no extra FFT/shader work is introduced here. */
     for (int i = 0; i < AUDIO_VIS_BANDS; i++) {
-        const float t = live ? b[i] : 0.0f;
-        vis_band[i] += (t - vis_band[i]) * (t > vis_band[i] ? 0.65f : 0.13f);
-        vis_peak[i] -= 0.010f;
+        const float t = live ? b[i] * 0.62f : 0.0f;
+        const float rate = t > vis_band[i] ? 0.22f : 0.075f;
+        vis_band[i] += (t - vis_band[i]) * rate;
+        vis_peak[i] -= 0.0065f;
         if (vis_peak[i] < vis_band[i]) vis_peak[i] = vis_band[i];
     }
-    for (int k = 0; k < AUDIO_VIS_WAVE; k++) vis_wave[k] += ((live ? w[k] : 0.0f) - vis_wave[k]) * 0.5f;
-    vis_bass += (((vis_band[0] + vis_band[1] + vis_band[2]) / 3.0f) - vis_bass) * 0.25f;
+    for (int k = 0; k < AUDIO_VIS_WAVE; k++) {
+        const float target = live ? w[k] * 0.58f : 0.0f;
+        vis_wave[k] += (target - vis_wave[k]) * 0.18f;
+    }
+    vis_bass += (((vis_band[0] + vis_band[1] + vis_band[2]) / 3.0f) - vis_bass) * 0.12f;
 }
 static bool      quit_req = false;
 static char      cur_path[800];
@@ -378,6 +387,47 @@ static void draw_text(const char *s, float x, float y, float sc, u32 color, u32 
     }
     C2D_TextOptimize(&t);
     C2D_DrawText(&t, C2D_WithColor | align, x, y, text_z, sc, sc, color);
+}
+
+static void draw_text_glow(const char *s, float x, float y, float sc, u32 align, Rgb col, Rgb gcol,
+                           float glow_alpha, float glow_width, float maxw);
+
+/* Draw a single-line marquee without allocating or adding a rendering effect. The
+ * visible window advances slowly only when the text is actually wider than its panel. */
+static void draw_marquee_text(const char *s, float x, float y, float sc, u32 color, float maxw, bool glow)
+{
+    if (!s || !s[0]) return;
+    char tmp[300];
+    snprintf(tmp, sizeof tmp, "%s", s);
+    C2D_Text t;
+    C2D_TextParse(&t, tbuf, tmp);
+    float w = 0, h = 0;
+    C2D_TextGetDimensions(&t, sc, sc, &w, &h);
+    if (w <= maxw) {
+        if (glow) draw_text_glow(tmp, x, y, sc, C2D_AlignLeft, th_acc, th_glow, 0.55f, 1.0f, maxw);
+        else draw_text(tmp, x, y, sc, color, C2D_AlignLeft, maxw);
+        return;
+    }
+    const size_t len = strlen(tmp);
+    const int chars = (int)(len * maxw / w);
+    const int window = chars > 4 ? chars - 2 : 1;
+    const int cycle = (int)len + window + 8;
+    const int phase = (int)((osGetTime() / 75ULL) % (u64)cycle);
+    int start = phase;
+    if (start > (int)len - window) start = (int)len - window;
+    if (start < 0) start = 0;
+    size_t end = (size_t)start + (size_t)window;
+    if (end > len) end = len;
+    while (end > (size_t)start && (((unsigned char)tmp[end]) & 0xC0) == 0x80) end--;
+    char view[300];
+    size_t n = end - (size_t)start;
+    if (n > sizeof view - 4) n = sizeof view - 4;
+    memcpy(view, tmp + start, n);
+    view[n] = 0;
+    if (start > 0) { memmove(view + 1, view, n + 1); view[0] = ' '; }
+    if (end < len && strlen(view) < sizeof view - 4) strcat(view, "...");
+    if (glow) draw_text_glow(view, x, y, sc, C2D_AlignLeft, th_acc, th_glow, 0.55f, 1.0f, maxw);
+    else draw_text(view, x, y, sc, color, C2D_AlignLeft, maxw);
 }
 
 static void draw_text_sh(const char *s, float x, float y, float sc, u32 color, u32 align, float maxw)
@@ -742,24 +792,8 @@ static void exit_search(void)
     set_dir(S.last_dir, back[0] ? back : NULL);      /* back to the folder we searched from */
 }
 
-/* Shows the system keyboard; a confirmed query starts the search (see run_search). */
-static void open_search(void)
-{
-    SwkbdState kb;
-    char buf[192] = "";
-    swkbdInit(&kb, SWKBD_TYPE_NORMAL, 2, 40);
-    swkbdSetHintText(&kb, "Search songs");
-    swkbdSetButton(&kb, SWKBD_BUTTON_LEFT, "Cancel", false);
-    swkbdSetButton(&kb, SWKBD_BUTTON_RIGHT, "Search", true);
-    swkbdSetValidation(&kb, SWKBD_NOTEMPTY_NOTBLANK, 0, 0);
-    if (L_is_search) swkbdSetInitialText(&kb, search_q);
-    SwkbdButton b = swkbdInputText(&kb, buf, sizeof buf);
-    kb_returned = true;
-    if (b == SWKBD_BUTTON_RIGHT && buf[0]) {
-        snprintf(search_q, sizeof search_q, "%s", buf);
-        search_busy = 2;                              /* draw the "Searching..." screen first, then scan */
-    }
-}
+/* Opens the on-screen keyboard (see the keyboard section below); a confirmed query starts the search (run_search). */
+static void open_search(void) { kb_begin(); }
 
 static void run_search(void)
 {
@@ -830,10 +864,10 @@ static bool is_switch_row(int r)
 {
     return r == ROW_BATT || r == ROW_SLEEP_ENABLE || r == ROW_EQMAN || r == ROW_OLED || r == ROW_DYN ||
            r == ROW_INFO || r == ROW_RESUME || r == ROW_SAVER ||
-           r == ROW_LY_SEARCH || r == ROW_LY_DL || r == ROW_LY_OFFLINE || r == ROW_LY_SYNC;
+           r == ROW_LY_SEARCH || r == ROW_LY_DL || r == ROW_LY_OFFLINE || r == ROW_LY_SYNC || r == ROW_LY_ANIM;
 }
 static bool is_band_row(int r)   { return r >= ROW_B0 && r <= ROW_B4; }
-static bool is_choice_row(int r) { return r == ROW_PRESET || r == ROW_EQPRE || r == ROW_CLOCK || r == ROW_GLOW || r == ROW_FADE || r == ROW_DISPLAY || r == ROW_WALLPAPER || r == ROW_SEEK || r == ROW_SLEEP_TIMER || r == ROW_GLOWCOL || r == ROW_BATTSTYLE; }
+static bool is_choice_row(int r) { return r == ROW_PRESET || r == ROW_EQPRE || r == ROW_CLOCK || r == ROW_GLOW || r == ROW_FADE || r == ROW_DISPLAY || r == ROW_WALLPAPER || r == ROW_SEEK || r == ROW_SLEEP_TIMER || r == ROW_GLOWCOL || r == ROW_BATTSTYLE || r == ROW_LY_FONT || r == ROW_KB_FONT; }
 
 static int card_pos(int card, int row)            /* index of `row` inside a card, or -1 */
 {
@@ -1042,6 +1076,10 @@ static void set_adjust(int dir)
         S.ly_offline = !S.ly_offline;
     } else if (set_row == ROW_LY_SYNC) {
         S.ly_sync = !S.ly_sync;
+    } else if (set_row == ROW_LY_FONT) {
+        S.ly_font = (S.ly_font + dir + 4) % 4;
+    } else if (set_row == ROW_KB_FONT) {
+        S.kb_font = (S.kb_font + dir + 4) % 4;
     } else {
         return;
     }
@@ -1204,8 +1242,18 @@ static void flow_update(void)          /* once per frame: animation + selection 
 
     if (flow_want_dirty && flow_show) { flow_refresh_wants(); flow_want_dirty = false; }
 
-    /* title/artist for the settled entry: one small file read, never while scrolling */
-    if (flow_idle > 6 && sel >= 0 && sel < L.n && !L.e[sel].meta_loaded && !L.e[sel].is_dir) ensure_meta(&L.e[sel]);
+    /* title/artist/length: reading a tag (and probing the first MP3 frame) is SD I/O plus a decode, so it never
+     * happens while the list is being scrolled. Once the selection has been still for ~0.2 s, one entry per frame
+     * is read: the selected one first, then its neighbours (so the next scroll finds the tags already loaded). */
+    if (flow_idle > 12) {
+        static const int tag_order[9] = { 0, 1, -1, 2, -2, 3, -3, 4, -4 };
+        for (int k = 0; k < 9; k++) {
+            const int i = sel + tag_order[k];
+            if (i < 0 || i >= L.n || L.e[i].is_dir || L.e[i].meta_loaded) continue;
+            ensure_meta(&L.e[i]);
+            break;
+        }
+    }
 
     unsigned as = art_serial();
     if (as != art_seen) { art_seen = as; art_fade = 0.0f; }
@@ -1668,7 +1716,7 @@ static void pv_scope(void)
     for (int i = 0; i < AUDIO_VIS_WAVE; i++) {
         float w = vis_wave[i];
         if (idle) w = 0.16f * sinf(ts * 2.0f + (float)i * 0.45f);
-        w *= 1.5f;
+        w *= 0.72f;
         if (w > 1.0f) w = 1.0f;
         if (w < -1.0f) w = -1.0f;
         const float x = ax0 + (float)i * step, y = mid + w * amp;
@@ -1681,7 +1729,7 @@ static void pv_scope(void)
     /* level strip along the bottom */
     const int SEG = lite ? 20 : 40;
     const float sw = (ax1 - ax0) / (float)SEG;
-    const int lit = (int)(pv_clamp01(vis_bass * 1.5f) * (float)SEG + 0.5f);
+    const int lit = (int)(pv_clamp01(vis_bass * 0.95f) * (float)SEG + 0.5f);
     for (int k = 0; k < SEG; k++) {
         u32 col = k < lit ? (k >= SEG - 4 ? cMid : cOn) : cGhost;
         if (k >= lit && lite) continue;
@@ -1726,7 +1774,7 @@ static void pv_deck(void)
     for (int i = 0; i < 6; i++) lo += vis_band[i] / 6.0f;
     for (int i = 5; i < AUDIO_VIS_BANDS; i++) hi += vis_band[i] / 7.0f;
     if (pv_standby()) { const float ts = pv_tsec(); lo = 0.10f + 0.05f * sinf(ts * 1.3f); hi = 0.10f + 0.05f * sinf(ts * 1.1f + 1.0f); }
-    lo *= 1.35f; hi *= 1.7f;
+    lo *= 0.82f; hi *= 0.92f;
     vu_l += (lo - vu_l) * (lo > vu_l ? 0.45f : 0.12f);              /* needles: quick rise, lazy fall */
     vu_r += (hi - vu_r) * (hi > vu_r ? 0.45f : 0.12f);
 
@@ -1899,6 +1947,7 @@ static void draw_top(void)
         }
 
         /* the 3D-style cover carousel, unchanged */
+        flow_set_fast(fabsf(flow_pos - (float)sel) > 0.12f || (flow_appear > 0.02f && flow_appear < 0.98f));   /* moving: wide strips */
         flow_draw(items, 10, base, flow_pos, flow_appear, top_bg_color);
     } else if (art_ready()) {
         /* the cover settles in with a tiny scale-up and breathes with the bass (both off in Battery saver) */
@@ -1936,9 +1985,10 @@ static void draw_top(void)
                           : (e->title[0] ? e->title : base_name(e->name));
         sub = e->is_dir ? "Folder" : e->artist;
     }
-    if (halo_text) draw_text_glow(title, 72, py + 2, 0.70f, C2D_AlignLeft, th_acc, th_glow, 0.55f, 1.0f, track_loaded ? 262 : 280);
-    else draw_text(title, 72, py + 2, 0.70f, cAcc, C2D_AlignLeft, track_loaded ? 262 : 280);
-    if (sub[0]) draw_text(sub, 72, py + 23, 0.44f, cText, C2D_AlignLeft, 262);
+    /* Clear hierarchy: title is the primary line, artist is secondary. Both stay inside
+     * the panel and marquee automatically when metadata is longer than the available width. */
+    draw_marquee_text(title, 72, py + 2, 0.70f, cAcc, track_loaded ? 262.0f : 280.0f, halo_text);
+    if (sub[0]) draw_marquee_text(sub, 72, py + 23, 0.44f, cText, 262.0f, false);
     if (track_loaded) {
         if (track_is_favorite()) icon_heart(357, pcy, 7.0f, cAcc);
         else icon_heart_line(357, pcy, 7.0f, cDim, cRowSel);
@@ -1969,7 +2019,7 @@ static void draw_top(void)
 
 /* ====================================================================== lyrics screen
  * Top screen: current line highlighted in the middle, upcoming lines below (synced), or a scrollable text
- * (plain). Bottom screen: status, search / settings buttons and the playback deck. */
+ * (plain). Bottom screen intentionally remains the normal browser/player UI. */
 static float fit_scale(const char *s, float sc, float maxw)       /* shrink a line to fit the screen width */
 {
     char tmp[300];
@@ -1982,15 +2032,54 @@ static float fit_scale(const char *s, float sc, float maxw)       /* shrink a li
     return sc;
 }
 
+static float ly_font_scale(float sc)
+{
+    if (S.ly_font == 2) return sc * 0.88f;
+    return sc;
+}
+
+static void ly_draw_text(const char *s, float x, float y, float sc, u32 color, u32 align, float maxw)
+{
+    sc = ly_font_scale(sc);
+    if (S.ly_font == 1) {
+        /* Bold style: two sub-pixel-offset passes using the same native 3DS font.
+         * This keeps the build self-contained while making the lyric face visibly heavier. */
+        draw_text(s, x + 0.65f, y, sc, color, align, maxw);
+        draw_text(s, x, y + 0.45f, sc, color, align, maxw);
+    }
+    draw_text(s, x, y, sc, color, align, maxw);
+}
+
+/* Gothic lyrics typeface (Settings > Lyrics > Lyrics font). Lyrics screen only: drawn from the glyph atlas in
+ * lyfont.c. A line is shrunk to fit (and, only past LY_GOTHIC_MIN, cut with "...") so English and Spanish lines look
+ * alike; only a line holding a character the atlas has no glyph for (other scripts, symbols) returns false and the
+ * caller uses the system font, so no lyric is ever lost. yc = vertical centre of the letters. */
+#define LY_GOTHIC_MIN 0.36f
+static bool ly_gothic_line(const char *s, float x, float yc, float sc, Rgb col, float glow, float maxw)
+{
+    if (S.ly_font != 0 || !lyfont_ok() || !lyfont_can(s)) return false;
+    char cut[320];
+    const float w = lyfont_width(s, sc);
+    if (w > maxw) sc *= maxw / w;
+    if (sc < LY_GOTHIC_MIN) { sc = LY_GOTHIC_MIN; s = lyfont_fit(s, sc, maxw, cut, sizeof cut); }
+    if (glow > 0.01f && !S.saver) {                                   /* soft halo: four offset copies */
+        static const float ox[4] = { 1.5f, -1.5f, 0.0f, 0.0f }, oy[4] = { 0.0f, 0.0f, 1.5f, -1.5f };
+        const u32 g = C(mix_rgb(th_bg, th_glow, (int)(110.0f * glow)));
+        for (int i = 0; i < 4; i++) lyfont_draw(s, x + ox[i], yc + oy[i], sc, g, C2D_AlignCenter, text_z - 0.01f);
+    }
+    lyfont_draw(s, x, yc, sc, C(col), C2D_AlignCenter, text_z);
+    return true;
+}
+
 static const char *ly_state_msg(LyState st, const char **sub)
 {
     switch (st) {
-    case LY_LOADING:  *sub = "Your music keeps playing";            return "Searching for lyrics";
+    case LY_LOADING:  *sub = "";                                        return "Searching for lyrics";
     case LY_IDLE:     *sub = "Press A to search online";            return "No saved lyrics for this song";
-    case LY_NOTFOUND: *sub = "Press A to search again";             return "No lyrics found";
+    case LY_NOTFOUND: *sub = "Press A to search again";             return "LYRICS NOT FOUND";
     case LY_OFFLINE:  *sub = "Turn off Offline only to search";     return "No cached lyrics (offline only)";
     case LY_NONET:    *sub = "Connect to Wi-Fi, then press A";      return "No Wi-Fi connection";
-    case LY_ERROR:    *sub = "Press A to try again";                return "Couldn't reach the lyrics servers";
+    case LY_ERROR:    *sub = "Press A to search again";             return "LYRICS NOT FOUND";
     default:          *sub = "";                                    return "";
     }
 }
@@ -2024,8 +2113,8 @@ static void draw_lyrics_top(void)
     if (!ready) {
         const char *sub;
         const char *msg = ly_state_msg(st, &sub);
-        draw_text(msg, 200, 92, 0.62f, cText, C2D_AlignCenter, 370);
-        draw_text(sub, 200, 118, 0.42f, cDim, C2D_AlignCenter, 370);
+        if (!ly_gothic_line(msg, 200, 100, 0.74f, th_tx, 0.0f, 370)) ly_draw_text(msg, 200, 92, 0.62f, cText, C2D_AlignCenter, 370);
+        if (sub[0]) ly_draw_text(sub, 200, 124, 0.42f, cDim, C2D_AlignCenter, 370);
         if (st == LY_LOADING) {
             const float ts = pv_tsec();
             for (int k = 0; k < 3; k++) {
@@ -2036,7 +2125,7 @@ static void draw_lyrics_top(void)
     } else if (synced) {
         const int idx = lyrics_index_at(pos);
         const float goal = (float)idx;
-        if (S.saver || fabsf(goal - ly_pos) > 6.0f) ly_pos = goal; else ly_pos += (goal - ly_pos) * 0.20f;
+        if (!S.ly_animated || S.saver || fabsf(goal - ly_pos) > 6.0f) ly_pos = goal; else ly_pos += (goal - ly_pos) * 0.20f;
         const int c0 = (int)floorf(ly_pos + 0.5f);
         for (int k = -3; k <= 3; k++) {
             const int i = c0 + k;
@@ -2044,30 +2133,43 @@ static void draw_lyrics_top(void)
             const float d = (float)i - ly_pos, ad = fabsf(d);
             const float a = 1.0f - ad * 0.27f;
             if (a < 0.08f) continue;
-            const float cy = 118.0f + d * 25.0f;
+            const float cy = 118.0f + d * 25.0f + 3.0f * fmaxf(-1.0f, fminf(1.0f, d));   /* a little air around the current line */
             const char *tx = lyrics_text(i);
             if (i == idx) {
-                const float sc = fit_scale(tx, 0.70f, 372.0f);
-                draw_text_glow(tx, 200, cy - 14.0f * sc, sc, C2D_AlignCenter, mix_rgb(th_acc, th_tx, 60), th_glow, 0.45f, 1.0f, 372);
+                if (!ly_gothic_line(tx, 200, cy, 0.78f, mix_rgb(th_acc, th_tx, 60), 0.45f, 372.0f)) {
+                    const float sc = fit_scale(tx, 0.70f, 372.0f);
+                    if (S.ly_font == 0)
+                        draw_text_glow(tx, 200, cy - 14.0f * sc, sc, C2D_AlignCenter, mix_rgb(th_acc, th_tx, 60), th_glow, 0.45f, 1.0f, 372);
+                    else
+                        ly_draw_text(tx, 200, cy - 14.0f * ly_font_scale(sc), sc, C(mix_rgb(th_acc, th_tx, 60)), C2D_AlignCenter, 372);
+                }
             } else {
-                draw_text(tx, 200, cy - 14.0f * 0.46f, 0.46f, Ca(mix_rgb(th_tx, th_bg, 55), a), C2D_AlignCenter, 372);
+                const Rgb dim = mix_rgb(mix_rgb(th_tx, th_bg, 55), th_bg, (int)((1.0f - a) * 255.0f));
+                if (!ly_gothic_line(tx, 200, cy, 0.60f, dim, 0.0f, 372.0f))
+                    ly_draw_text(tx, 200, cy - 14.0f * ly_font_scale(0.46f), 0.46f, Ca(mix_rgb(th_tx, th_bg, 55), a), C2D_AlignCenter, 372);
             }
         }
     } else {
-        const float max_off = n > 8 ? (float)(n - 8) : 0.0f;
-        if (ly_goal > max_off) ly_goal = max_off;
-        if (ly_goal < 0.0f) ly_goal = 0.0f;
-        if (S.saver) ly_pos = ly_goal; else ly_pos += (ly_goal - ly_pos) * 0.30f;
-        for (int i = (int)floorf(ly_pos); i < n && i < (int)ly_pos + 10; i++) {
-            const float y = 38.0f + ((float)i - ly_pos) * 21.0f;
+        const float max_off = n > 7 ? (float)(n - 7) : 0.0f;
+        /* Plain text is advanced gently so long lyrics remain readable without
+         * requiring the bottom screen to become a separate lyrics UI. */
+        if (max_off > 0.0f) {
+            const float span = max_off + 2.0f;
+            ly_goal = fmodf((float)(osGetTime() % (u64)60000) / 7000.0f, span);
+            if (ly_goal > max_off) ly_goal = max_off;
+        } else ly_goal = 0.0f;
+        if (!S.ly_animated || S.saver) ly_pos = ly_goal; else ly_pos += (ly_goal - ly_pos) * 0.08f;
+        for (int i = (int)floorf(ly_pos); i < n && i < (int)ly_pos + 9; i++) {
+            const float y = 38.0f + ((float)i - ly_pos) * 23.0f;
             float a = fminf((y - 28.0f) / 12.0f, (206.0f - y) / 12.0f);
             if (a <= 0.02f) continue;
             if (a > 1.0f) a = 1.0f;
-            draw_text(lyrics_text(i), 200, y, 0.50f, Ca(th_tx, a), C2D_AlignCenter, 366);
+            if (!ly_gothic_line(lyrics_text(i), 200, y + 10.0f, 0.60f, mix_rgb(th_bg, th_tx, (int)(a * 255.0f)), 0.0f, 366.0f))
+                ly_draw_text(lyrics_text(i), 200, y, 0.50f, Ca(th_tx, a), C2D_AlignCenter, 366);
         }
-        if (n > 8) {                                                   /* scroll position */
+        if (n > 7) {                                                   /* scroll position */
             rrect(391, 36, 4, 164, 2, 0.08f, cTrk);
-            const float th = 164.0f * 8.0f / (float)n, ty = 36.0f + (164.0f - th) * (ly_pos / max_off);
+            const float th = 164.0f * 7.0f / (float)n, ty = 36.0f + (164.0f - th) * (ly_pos / max_off);
             rrect(391, ty, 4, th < 10.0f ? 10.0f : th, 2, 0.09f, cAcc);
         }
     }
@@ -2094,7 +2196,7 @@ static void draw_lyrics_top(void)
 /* ====================================================================== bottom-screen UI
  * Layout (320 x 240):   header 5..31 | tabs 36..60 | song list 66..190 | deck 194..236
  * Layering (citro2d depth: higher z = in front, equal z = draw order, text is always z 0.5):
- *   0.10 frame   0.12 wallpaper   0.20 panels / rims / insets   0.22 buttons   0.26 press flash
+ *   0.10 frame   0.20 panels / rims / insets   0.22 buttons   0.26 press flash
  *   0.30 widgets   0.45 icons   0.46 toast
  */
 static void draw_frame(void)                  /* neon outline + dark fill for the whole bottom screen */
@@ -2230,7 +2332,12 @@ static void draw_browser(void)
         row_text("Search Music...", 40, 35, 26, 0.42f, cDim, C2D_AlignLeft, 160);
     }
     /* LYRICS: opens the lyrics screen for the song that is loaded */
-    if (track_loaded) {
+    if (track_loaded && lyrics_open) {
+        /* Active state belongs to the LYRICS control itself; the rest of the bottom
+         * screen keeps its normal colours and layout. */
+        neon_box(246, 35, 66, 26, 13, 0.30f, cAcc, cGlow, C(mix_rgb(th_bg, th_acc, 42)));
+        row_text("LYRICS", 279, 35, 26, 0.40f, cBg, C2D_AlignCenter, 58);
+    } else if (track_loaded) {
         neon_box(246, 35, 66, 26, 13, 0.20f, cAcc, cGlow, cFill);
         row_text("LYRICS", 279, 35, 26, 0.40f, cAcc, C2D_AlignCenter, 58);
     } else {
@@ -2240,7 +2347,6 @@ static void draw_browser(void)
 
     /* ---- song list ---- */
     const float RX = 8, RW = 290, RH = ROW_H - 4;
-    int loads_this_frame = 0;
     for (int i = 0; i < VIS_ROWS; i++) {
         int idx = scroll_top + i;
         if (idx >= L.n) break;
@@ -2286,7 +2392,6 @@ static void draw_browser(void)
             row_text(!strcmp(e->name, "..") ? "Back" : e->name, lx, y, RH, 0.60f, selected ? cAcc : cText, C2D_AlignLeft, 232);
             continue;
         }
-        if (!e->meta_loaded && loads_this_frame < 1 && flow_idle > 2) { ensure_meta(e); loads_this_frame++; }
         const char *name = (e->meta_loaded && e->title[0]) ? e->title : base_name(e->name);
         u32 tcol = (selected || cur_row) ? cAcc : cText;
         if (e->meta_loaded && e->artist[0]) {
@@ -2335,39 +2440,46 @@ static void draw_lyrics_bottom(void)
     const u32 cGrey = C(mix_rgb(th_bg, th_tx, 42)), cGreyGl = C(mix_rgb(th_bg, th_tx, 14));
     const LyState st = lyrics_state();
     const bool ready = (st == LY_READY);
+    const char *title = cur.title[0] ? cur.title : base_name(cur_path);
+    const char *artist = cur.artist[0] ? cur.artist : "Unknown artist";
 
-    draw_text("Lyrics", 14, 2, 0.85f, cText, C2D_AlignLeft, 220);
-    rrect(250, 6, 62, 22, 11, 0.30f, cAcc);                      /* Back pill (touch: y < 40, x >= 244) */
+    draw_text("Lyrics", 14, 2, 0.85f, cText, C2D_AlignLeft, 180);
+    rrect(250, 6, 62, 22, 11, 0.30f, cAcc);
     row_text("Back", 281, 6, 22, 0.45f, cBg, C2D_AlignCenter, 0);
 
-    /* song + what happened */
-    char line[96];
+    /* Clean song header: one compact card, no duplicated status prose. */
+    neon_box(8, 44, 304, 48, 12, 0.18f, cAcc, cGlow, cFill);
+    ly_draw_text(title, 18, 48, 0.52f, cAcc, C2D_AlignLeft, 248);
+    ly_draw_text(artist, 18, 66, 0.38f, cText, C2D_AlignLeft, 248);
+    const char *chip = ready ? (lyrics_synced() ? "SYNC" : "TEXT") :
+                       (st == LY_LOADING ? "SEARCH" : (st == LY_OFFLINE ? "OFFLINE" : ""));
+    if (chip[0]) row_text(chip, 292, 48, 22, 0.36f, cAcc, C2D_AlignRight, 50);
+
+    /* Primary action is always in the same place, so it is fast to reach. */
+    if (!ready) {
+        const bool can = !S.ly_offline && st != LY_LOADING;
+        const char *lab = S.ly_offline ? "Offline only" : (st == LY_LOADING ? "Searching..." : "Search online  (A)");
+        neon_box(8, 100, 304, 34, 17, 0.20f, can ? cAcc : cGrey, can ? cGlow : cGreyGl, cFill);
+        row_text(lab, 160, 100, 34, 0.46f, can ? cAcc : cDim, C2D_AlignCenter, 280);
+    } else {
+        const char *hint = lyrics_synced() ? "Synced to playback" : "D-pad Up / Down to scroll";
+        ly_draw_text(hint, 160, 104, 0.40f, cDim, C2D_AlignCenter, 296);
+    }
+
+    /* Source/status line and a single settings entry keep the screen uncluttered. */
+    char status[96];
     if (ready) {
         const char *src = lyrics_source();
         if (!strcmp(src, "cache")) src = "SD cache";
         else if (!strcmp(src, "file")) src = ".lrc file";
-        snprintf(line, sizeof line, "%s lyrics - %s", lyrics_synced() ? "Synced" : "Plain text", src);
+        snprintf(status, sizeof status, "%s  •  %s", lyrics_synced() ? "Synced" : "Plain text", src);
     } else {
         const char *sub;
-        snprintf(line, sizeof line, "%s", ly_state_msg(st, &sub));
+        snprintf(status, sizeof status, "%s", ly_state_msg(st, &sub));
     }
-    neon_box(8, 46, 304, 58, 12, 0.20f, cAcc, cGlow, cFill);
-    const char *title = cur.title[0] ? cur.title : base_name(cur_path);
-    draw_text(title, 20, 51, 0.52f, cAcc, C2D_AlignLeft, 280);
-    draw_text(cur.artist[0] ? cur.artist : "Unknown artist", 20, 69, 0.40f, cText, C2D_AlignLeft, 280);
-    draw_text(line, 20, 84, 0.38f, cDim, C2D_AlignLeft, 280);
-
-    /* Search online */
-    if (!ready) {
-        const bool can = !S.ly_offline && st != LY_LOADING;
-        const char *lab = S.ly_offline ? "Offline only - search disabled" : (st == LY_LOADING ? "Searching..." : "Search online  (A)");
-        neon_box(8, 112, 304, 32, 16, 0.20f, can ? cAcc : cGrey, can ? cGlow : cGreyGl, cFill);
-        row_text(lab, 160, 112, 32, 0.46f, can ? cAcc : cDim, C2D_AlignCenter, 280);
-    } else {
-        draw_text(lyrics_synced() ? "Lines follow the song" : "D-pad Up / Down  scrolls the text", 160, 120, 0.40f, cDim, C2D_AlignCenter, 296);
-    }
-    neon_box(8, 150, 304, 32, 16, 0.20f, cGrey, cGreyGl, cFill);
-    row_text("Lyrics settings  (SELECT)", 160, 150, 32, 0.46f, cText, C2D_AlignCenter, 280);
+    ly_draw_text(status, 160, 140, 0.34f, cDim, C2D_AlignCenter, 296);
+    neon_box(8, 154, 304, 28, 14, 0.16f, cGrey, cGreyGl, cFill);
+    row_text("Lyrics settings  (SELECT)", 160, 154, 28, 0.42f, cText, C2D_AlignCenter, 280);
 
     draw_deck();
 }
@@ -2455,33 +2567,8 @@ static const char *UI_WALLPAPER_NAMES[5] = { "Plain", "Scanlines", "Dots", "Corn
 static const char *UI_DISPLAY_NAMES[4]   = { "Cover", "LED Spectrum", "Scope", "VU Deck" };
 static const char *UI_BATT_NAMES[2]      = { "Icon", "Percent" };
 static const char *UI_CLOCK_NAMES[3]     = { "Off", "12-hour", "24-hour" };
-
-/* Faint decoration behind the bottom screen (Settings > Appearance > Wallpaper). Drawn just above the
- * background gradient and below everything else. */
-static void draw_wallpaper_accents(float w, float h)
-{
-    if (S.wallpaper <= 0 || S.wallpaper > 4) return;
-    const float z = 0.12f, m = 4.0f;                              /* stay inside the neon frame */
-    u32 c  = C(mix_rgb(th_bg, th_acc, 22));
-    u32 c2 = C(mix_rgb(th_bg, th_acc, 34));
-    switch (S.wallpaper) {
-    case 1:                                                       /* scanlines */
-        for (float y = 5; y < h - m; y += 6) C2D_DrawRectSolid(m, y, z, w - 2 * m, 1, c);
-        break;
-    case 2:                                                       /* dot grid */
-        for (float y = 8; y < h - m; y += 16)
-            for (float x = 8; x < w - m; x += 16) C2D_DrawRectSolid(x, y, z, 2, 2, c2);
-        break;
-    case 3:                                                       /* corner glows */
-        C2D_DrawTriangle(m, m, c2, 90, m, c, m, 90, c, z);
-        C2D_DrawTriangle(w - m, h - m, c2, w - 90, h - m, c, w - m, h - 90, c, z);
-        break;
-    case 4:                                                       /* grid */
-        for (float x = 40; x < w - m; x += 40) C2D_DrawRectSolid(x, m, z, 1, h - 2 * m, c);
-        for (float y = 40; y < h - m; y += 40) C2D_DrawRectSolid(m, y, z, w - 2 * m, 1, c);
-        break;
-    }
-}
+static const char *UI_LY_FONT_NAMES[4]   = { "Gothic", "Bold", "Compact", "System" };
+static const char *UI_KB_FONT_NAMES[4]   = { "Gothic", "Bold", "System", "Compact" };
 
 /* ------------------------------------------------------------ settings UI */
 static const char *row_label(int r)
@@ -2491,14 +2578,13 @@ static const char *row_label(int r)
     case ROW_GLOW:         return "Ambient glow";
     case ROW_FADE:         return "Cover fade";
     case ROW_DISPLAY:      return "Visualizer";
-    case ROW_WALLPAPER:    return "Wallpaper";
     case ROW_EQMAN:        return "Manual EQ";
     case ROW_EQPRE:        return "EQ preset";
     case ROW_SEEK:         return "Skip length";
     case ROW_CLOCK:        return "Clock";
     case ROW_BATT:         return "Battery";
     case ROW_BATTSTYLE:    return "Battery style";
-    case ROW_OLED:         return "OLED black";
+    case ROW_OLED:         return "OLED mode";
     case ROW_GLOWCOL:      return "Glow color";
     case ROW_DYN:          return "Album colors";
     case ROW_INFO:         return "Track info";
@@ -2511,6 +2597,9 @@ static const char *row_label(int r)
     case ROW_LY_DL:        return "Auto download";
     case ROW_LY_OFFLINE:   return "Offline only";
     case ROW_LY_SYNC:      return "Prefer synced";
+    case ROW_LY_ANIM:      return "Animated lyrics";
+    case ROW_LY_FONT:      return "Lyrics font";
+    case ROW_KB_FONT:      return "Keyboard font";
     case ROW_LY_CLEAR:     return "Clear lyrics cache";
     case ROW_EXIT:         return "Exit app";
     }
@@ -2526,11 +2615,12 @@ static void row_value(int r, char *out, size_t cap)
     case ROW_GLOW:      s = GLOW_NAMES[(unsigned)S.glow % GLOW_COUNT]; break;
     case ROW_FADE:      s = FADE_NAMES[(unsigned)S.fade_speed % FADE_COUNT]; break;
     case ROW_DISPLAY:   s = UI_DISPLAY_NAMES[(unsigned)S.display_mode % 4]; break;
-    case ROW_WALLPAPER: s = UI_WALLPAPER_NAMES[(unsigned)S.wallpaper % 5]; break;
     case ROW_EQPRE:     s = EQ_PRESET_NAMES[(unsigned)S.eq_preset % EQ_PRESET_COUNT]; break;
     case ROW_CLOCK:     s = UI_CLOCK_NAMES[(unsigned)S.clock_mode % 3]; break;
     case ROW_GLOWCOL:   s = GLOWCOL_NAMES[(unsigned)S.glow_color % GLOWCOL_COUNT]; break;
     case ROW_BATTSTYLE: s = UI_BATT_NAMES[(unsigned)S.batt_style % 2]; break;
+    case ROW_LY_FONT:   s = UI_LY_FONT_NAMES[(unsigned)S.ly_font % 4]; break;
+    case ROW_KB_FONT:   s = UI_KB_FONT_NAMES[(unsigned)S.kb_font % 4]; break;
     case ROW_SEEK:      snprintf(out, cap, "%d s", S.seek_step); return;
     case ROW_SLEEP_TIMER: snprintf(out, cap, "%d min", S.sleep_minutes); return;
     default: break;
@@ -2550,6 +2640,7 @@ static bool row_switch_on(int r)
     if (r == ROW_LY_DL)        return S.ly_download;
     if (r == ROW_LY_OFFLINE)   return S.ly_offline;
     if (r == ROW_LY_SYNC)      return S.ly_sync;
+    if (r == ROW_LY_ANIM)      return S.ly_animated;
     if (r == ROW_EQMAN)        return S.eq_manual;
     if (r == ROW_SLEEP_ENABLE) return sleep_timer_active;
     return false;
@@ -2928,6 +3019,317 @@ static void handle_ctrl_tap(int px, int py)      /* bottom deck: seek line, tran
 
 static void open_up_next(void) { queue_open = true; queue_sel = 0; queue_scroll = 0; }
 
+/* ================================================================ on-screen keyboard
+ * Replaces the system keyboard for song search. Full bottom screen, drawn in the app's own style (dark rounded
+ * keys, accent rim, glow on the key being pressed) with the Settings > Look > Keyboard font typeface:
+ * Gothic (the lyrics glyph atlas), Bold, System or Compact. Touch a key, or use the D-pad + A.
+ * Keys are plain rounded rectangles (no halo unless pressed / selected) to keep the draw cost low. */
+#define KB_MAXLEN  40
+#define KB_U       28.5f       /* one key unit: ten units + nine gaps span the 312 px keyboard width */
+#define KB_G       3.0f
+#define KB_X0      4.0f
+#define KB_Y0      72.0f
+#define KB_H       32.0f
+#define KB_VG      4.0f
+#define KB_FIELD_X 34.0f       /* typed text: left edge and visible width */
+#define KB_FIELD_W 258.0f
+#define KB_FIELD_SC 0.52f      /* typed text size (system-font scale; the Gothic glyphs are scaled to match) */
+
+enum { KK_CHAR, KK_SHIFT, KK_BKSP, KK_PAGE, KK_SPACE, KK_GO };
+typedef struct { float x, y, w, h; unsigned char kind; char ch; } KbKey;
+
+static bool   kb_open = false;
+static char   kb_buf[KB_MAXLEN + 1];
+static int    kb_len = 0;
+static int    kb_view = 0;                 /* first visible character of the typed text */
+static int    kb_page = 0;                 /* 0 = letters, 1 = digits / symbols */
+static bool   kb_shift = false;            /* one-shot capital */
+static bool   kb_pad = false;              /* D-pad cursor visible */
+static int    kb_sel = 0, kb_flash = -1, kb_flash_t = 0, kb_hold = 0;
+static KbKey  kb_key[32];
+static int    kb_nkey = 0;
+
+static void kb_add(int row, float *col, float w, int kind, char ch)
+{
+    KbKey *k = &kb_key[kb_nkey++];
+    k->x = KB_X0 + *col * (KB_U + KB_G);
+    k->y = KB_Y0 + (float)row * (KB_H + KB_VG);
+    k->w = w * (KB_U + KB_G) - KB_G;
+    k->h = KB_H;
+    k->kind = (unsigned char)kind;
+    k->ch = ch;
+    *col += w;
+}
+
+static void kb_chars(int row, float *col, const char *chars)
+{
+    for (; *chars; chars++) kb_add(row, col, 1.0f, KK_CHAR, *chars);
+}
+
+static void kb_layout(void)
+{
+    float c = 0.0f;
+    kb_nkey = 0;
+    kb_chars(0, &c, kb_page ? "1234567890" : "qwertyuiop");
+    c = 0.5f;
+    kb_chars(1, &c, kb_page ? "-/:;()&'\"" : "asdfghjkl");
+    c = 0.0f;
+    if (kb_page) {
+        kb_add(2, &c, 2.0f, KK_CHAR, '.');
+        kb_add(2, &c, 2.0f, KK_CHAR, ',');
+        kb_add(2, &c, 2.0f, KK_CHAR, '!');
+        kb_add(2, &c, 2.0f, KK_CHAR, '?');
+        kb_add(2, &c, 2.0f, KK_BKSP, 0);
+    } else {
+        kb_add(2, &c, 1.5f, KK_SHIFT, 0);
+        kb_chars(2, &c, "zxcvbnm");
+        kb_add(2, &c, 1.5f, KK_BKSP, 0);
+    }
+    c = 0.0f;
+    kb_add(3, &c, 2.0f, KK_PAGE, 0);
+    kb_add(3, &c, 5.0f, KK_SPACE, ' ');
+    kb_add(3, &c, 3.0f, KK_GO, 0);
+    if (kb_sel >= kb_nkey) kb_sel = kb_nkey - 1;
+}
+
+/* text in the chosen keyboard font. sc is the System-font scale; cy is the vertical centre of the text */
+static bool  kb_gothic(const char *s) { return S.kb_font == 0 && lyfont_ok() && lyfont_can(s); }
+static float kb_scale(const char *s, float sc)
+{
+    if (kb_gothic(s)) return sc * 0.75f;                 /* Gothic glyph cells are taller than the system font's */
+    return S.kb_font == 3 ? sc * 0.85f : sc;
+}
+
+static float kb_text_w(const char *s, float sc)
+{
+    if (!s[0]) return 0.0f;
+    const float k = kb_scale(s, sc);
+    if (kb_gothic(s)) return lyfont_width(s, k);
+    char tmp[64];
+    snprintf(tmp, sizeof tmp, "%s", s);
+    C2D_Text t;
+    C2D_TextParse(&t, tbuf, tmp);
+    float w = 0, h = 0;
+    C2D_TextGetDimensions(&t, k, k, &w, &h);
+    return w + (S.kb_font == 1 ? 0.55f : 0.0f);
+}
+
+static void kb_text(const char *s, float x, float cy, float sc, u32 col, u32 align)
+{
+    if (!s[0]) return;
+    const float k = kb_scale(s, sc);
+    if (kb_gothic(s)) { lyfont_draw(s, x, cy, k, col, align, text_z); return; }
+    const float y = cy - 14.0f * k;
+    if (S.kb_font == 1) draw_text(s, x + 0.55f, y, k, col, align, 0);
+    draw_text(s, x, y, k, col, align, 0);
+}
+
+/* keep the end of the typed text in view: the start of the line scrolls off when it gets too long */
+static void kb_refit(void)
+{
+    if (kb_view > kb_len) kb_view = kb_len;
+    while (kb_view < kb_len && kb_text_w(kb_buf + kb_view, KB_FIELD_SC) > KB_FIELD_W) kb_view++;
+    while (kb_view > 0 && kb_text_w(kb_buf + kb_view - 1, KB_FIELD_SC) <= KB_FIELD_W) kb_view--;
+}
+
+static void kb_close(void)
+{
+    kb_open = false;
+    kb_returned = true;                    /* the browser ignores touch state / held keys until they are released */
+}
+
+static void kb_begin(void)
+{
+    kb_len = 0;
+    kb_buf[0] = 0;
+    if (L_is_search) {
+        snprintf(kb_buf, sizeof kb_buf, "%s", search_q);
+        kb_len = (int)strlen(kb_buf);
+    }
+    kb_page = 0; kb_shift = false; kb_pad = false; kb_sel = 0; kb_view = 0;
+    kb_flash = -1; kb_flash_t = 0; kb_hold = 0;
+    kb_layout();
+    kb_refit();
+    kb_open = true;
+}
+
+static void kb_submit(void)
+{
+    int n = kb_len;
+    while (n > 0 && kb_buf[n - 1] == ' ') n--;
+    if (n == 0) { toast("Type a song or artist"); return; }          /* same rule as before: not empty, not blank */
+    kb_buf[n] = 0;
+    kb_len = n;
+    snprintf(search_q, sizeof search_q, "%s", kb_buf);
+    search_busy = 2;                                                  /* draw the "Searching..." screen first, then scan */
+    kb_close();
+}
+
+static void kb_backspace(void)
+{
+    if (kb_len <= 0) return;
+    kb_buf[--kb_len] = 0;
+    kb_refit();
+}
+
+static void kb_press(int i)
+{
+    if (i < 0 || i >= kb_nkey) return;
+    const KbKey *k = &kb_key[i];
+    kb_flash = i;
+    kb_flash_t = 6;
+    switch (k->kind) {
+    case KK_CHAR:
+    case KK_SPACE: {
+        if (kb_len >= KB_MAXLEN) break;
+        char c = k->ch;
+        if (k->kind == KK_SPACE && (kb_len == 0 || kb_buf[kb_len - 1] == ' ')) break;   /* no leading / double spaces */
+        if (c >= 'a' && c <= 'z' && kb_shift) { c = (char)(c - 'a' + 'A'); kb_shift = false; }
+        kb_buf[kb_len++] = c;
+        kb_buf[kb_len] = 0;
+        kb_refit();
+        break;
+    }
+    case KK_SHIFT: kb_shift = !kb_shift; break;
+    case KK_BKSP:  kb_backspace(); break;
+    case KK_PAGE:  kb_page ^= 1; kb_shift = false; kb_layout(); break;
+    case KK_GO:    kb_submit(); break;
+    }
+}
+
+static int kb_hit(int px, int py)
+{
+    for (int i = 0; i < kb_nkey; i++) {                              /* the gaps between keys belong to the nearest key */
+        const KbKey *k = &kb_key[i];
+        if (px >= k->x - KB_G / 2 && px < k->x + k->w + KB_G / 2 &&
+            py >= k->y - KB_VG / 2 && py < k->y + k->h + KB_VG / 2) return i;
+    }
+    return -1;
+}
+
+static void kb_move(int dx, int dy)                                  /* D-pad: nearest key in that direction */
+{
+    const KbKey *c = &kb_key[kb_sel];
+    const float cx = c->x + c->w / 2, cy = c->y + c->h / 2;
+    int best = -1;
+    float bs = 1e9f;
+    for (int i = 0; i < kb_nkey; i++) {
+        if (i == kb_sel) continue;
+        const KbKey *k = &kb_key[i];
+        const float ddx = k->x + k->w / 2 - cx, ddy = k->y + k->h / 2 - cy;
+        float sc;
+        if (dx) {
+            if (fabsf(ddy) > 4.0f || (dx < 0 ? ddx > -1.0f : ddx < 1.0f)) continue;
+            sc = fabsf(ddx);
+        } else {
+            if (dy < 0 ? ddy > -4.0f : ddy < 4.0f) continue;
+            sc = fabsf(ddy) * 4.0f + fabsf(ddx);
+        }
+        if (sc < bs) { bs = sc; best = i; }
+    }
+    if (best >= 0) kb_sel = best;
+}
+
+/* once per frame while the keyboard is open (input) */
+static void kb_update(u32 kd, u32 kh, touchPosition tp, int *hu, int *hd, int *hl, int *hr)
+{
+    if (kb_flash_t > 0) kb_flash_t--;
+    if (kd & KEY_SELECT) { kb_close(); return; }
+    if (kd & KEY_TOUCH) {
+        if (tp.py < 32) {
+            if (tp.px >= 244) { kb_close(); return; }                // Cancel
+        } else {
+            const int i = kb_hit(tp.px, tp.py);
+            if (i >= 0) {
+                kb_pad = false;
+                kb_sel = i;
+                kb_hold = (kb_key[i].kind == KK_BKSP) ? 1 : 0;
+                kb_press(i);
+                if (!kb_open) return;                                // Search was pressed
+            }
+        }
+    }
+    if (kb_hold && (kh & KEY_TOUCH)) {                               /* hold Backspace to keep deleting */
+        if (++kb_hold > 24 && (kb_hold % 3) == 0) kb_backspace();
+    } else {
+        kb_hold = 0;
+    }
+
+    if (repeat_fire(kh, KEY_DLEFT, hl))  { kb_pad = true; kb_move(-1, 0); }
+    if (repeat_fire(kh, KEY_DRIGHT, hr)) { kb_pad = true; kb_move(+1, 0); }
+    if (repeat_fire(kh, KEY_DUP, hu))    { kb_pad = true; kb_move(0, -1); }
+    if (repeat_fire(kh, KEY_DDOWN, hd))  { kb_pad = true; kb_move(0, +1); }
+    if (kd & KEY_A) { if (kb_pad) kb_press(kb_sel); else kb_pad = true; }
+    if (kd & KEY_B) { if (kb_len > 0) kb_backspace(); else { kb_close(); return; } }
+    if ((kd & KEY_X) && kb_page == 0) kb_shift = !kb_shift;
+    if (kd & (KEY_Y | KEY_START)) kb_submit();
+}
+
+static void draw_keyboard(void)
+{
+    const u32 cText = C(th_tx), cAcc = C(th_acc), cBg = C(th_bg);
+    const u32 cDim = C(mix_rgb(th_tx, th_bg, 120));
+    const u32 cGlow = neon_glow(), cFill = C(mix_rgb(th_bg, th_acc, 8));
+    const u32 cGrey = C(mix_rgb(th_bg, th_tx, 42));
+    const u32 cKey = C(mix_rgb(th_bg, th_tx, 10)), cGo = C(mix_rgb(th_bg, th_acc, 38)), cHot = C(mix_rgb(th_bg, th_acc, 90));
+    char s[2] = { 0, 0 };
+
+    /* header: title + Cancel pill (same pill as Lyrics > Back) */
+    kb_text("Search", 14, 17, 0.80f, cText, C2D_AlignLeft);
+    rrect(250, 6, 62, 22, 11, 0.30f, cAcc);
+    kb_text("Cancel", 281, 17, 0.45f, cBg, C2D_AlignCenter);
+
+    /* typed text */
+    neon_box(8, 34, 304, 30, 15, 0.20f, cAcc, cGlow, cFill);
+    icon_search(22, 49, cDim, cFill);
+    if (kb_len == 0) {
+        kb_text("Search music...", KB_FIELD_X, 49, KB_FIELD_SC, cDim, C2D_AlignLeft);
+    } else {
+        kb_text(kb_buf + kb_view, KB_FIELD_X, 49, KB_FIELD_SC, cText, C2D_AlignLeft);
+    }
+    if ((frame_no >> 5) & 1u) {                                      /* blinking caret */
+        const float cx = KB_FIELD_X + kb_text_w(kb_buf + kb_view, KB_FIELD_SC) + 2.0f;
+        C2D_DrawRectSolid(cx, 40.0f, 0.45f, 2.0f, 18.0f, cAcc);
+    }
+
+    /* keys */
+    for (int i = 0; i < kb_nkey; i++) {
+        const KbKey *k = &kb_key[i];
+        const bool hot = (i == kb_flash && kb_flash_t > 0);
+        const bool sel = kb_pad && i == kb_sel;
+        const bool lit = hot || sel || k->kind == KK_GO || (k->kind == KK_SHIFT && kb_shift);
+        const u32 fill = hot ? cHot : (k->kind == KK_GO ? cGo : cKey);
+        if (hot || sel) {
+            neon_box(k->x, k->y, k->w, k->h, 8, 0.20f, cAcc, cGlow, fill);
+        } else {
+            rrect(k->x, k->y, k->w, k->h, 8, 0.202f, lit ? cAcc : cGrey);
+            rrect(k->x + 1.6f, k->y + 1.6f, k->w - 3.2f, k->h - 3.2f, 6.4f, 0.204f, fill);
+        }
+        const float cx = k->x + k->w / 2, cy = k->y + k->h / 2;
+        switch (k->kind) {
+        case KK_CHAR:
+            s[0] = (kb_shift && k->ch >= 'a' && k->ch <= 'z') ? (char)(k->ch - 'a' + 'A') : k->ch;
+            kb_text(s, cx, cy, 0.66f, cText, C2D_AlignCenter);
+            break;
+        case KK_SHIFT: {
+            const u32 ic = kb_shift ? cAcc : cText;
+            C2D_DrawTriangle(cx, cy - 8, ic, cx - 8, cy + 1, ic, cx + 8, cy + 1, ic, 0.45f);
+            C2D_DrawRectSolid(cx - 3.5f, cy + 1, 0.45f, 7, 7, ic);
+            break;
+        }
+        case KK_BKSP:
+            C2D_DrawTriangle(cx - 11, cy, cText, cx - 3, cy - 8, cText, cx - 3, cy + 8, cText, 0.45f);
+            C2D_DrawRectSolid(cx - 3, cy - 8, 0.45f, 14, 16, cText);
+            C2D_DrawLine(cx + 0.5f, cy - 3.5f, cKey, cx + 6.5f, cy + 3.5f, cKey, 1.8f, 0.46f);
+            C2D_DrawLine(cx + 6.5f, cy - 3.5f, cKey, cx + 0.5f, cy + 3.5f, cKey, 1.8f, 0.46f);
+            break;
+        case KK_PAGE:  kb_text(kb_page ? "abc" : "123", cx, cy, 0.50f, cText, C2D_AlignCenter); break;
+        case KK_SPACE: kb_text("space", cx, cy, 0.46f, cDim, C2D_AlignCenter); break;
+        case KK_GO:    kb_text("Search", cx, cy, 0.52f, cAcc, C2D_AlignCenter); break;
+        }
+    }
+}
+
 /* ------------------------------------------------------------------ lyrics */
 static LyOptions ly_opts(void)
 {
@@ -2945,7 +3347,9 @@ static void lyrics_ask(bool force)                 /* look up lyrics for the loa
     LyTrack t;
     lyrics_identify(&t, cur_path, cur.title, cur.artist, cur.duration_ms);
     const LyOptions o = ly_opts();
-    lyrics_request(&t, &o, force);
+    /* Cache/sidecar reads are tiny and synchronous; adopt them before starting
+     * the network worker so opening Lyrics feels instant when an .lrc already exists. */
+    if (!lyrics_preload(&t, &o)) lyrics_request(&t, &o, force);
     snprintf(ly_asked, sizeof ly_asked, "%s", cur_path);
     ly_pos = 0.0f;
     ly_goal = 0.0f;
@@ -2981,7 +3385,7 @@ static void handle_header_tap(int px, int py)    /* tabs (All Songs / Liked Song
         else               open_up_next();
         return;
     }
-    if (px >= 244) open_lyrics();                       /* LYRICS pill */
+    if (px >= 244) { if (lyrics_open) lyrics_open = false; else open_lyrics(); } /* LYRICS pill */
     else if (L_is_search && px >= 204) exit_search();
     else open_search();
 }
@@ -3151,6 +3555,7 @@ static int bot_state_key(void)
 {
     if (search_busy > 0) return 1;
     if (confirm_exit) return 2;
+    if (kb_open) return 5;
     if (wizard_open) return 10 + wz_page;
     if (settings_open) return 20 + row_page(set_row);
     if (queue_open) return 3;
@@ -3346,7 +3751,7 @@ static void startup_load(C3D_RenderTarget *top, C3D_RenderTarget *bot)
             if (!audio_ok) snprintf(status_msg, sizeof status_msg, "No sound - dspfirm.cdc missing");
             break;
         case 1: flow_init(placeholder_png, placeholder_png_len); break;
-        case 2: lyrics_init(); break;
+        case 2: lyrics_init(); lyfont_init(); break;
         case 3: favorites_load(); break;
         case 4:
             set_dir(S.last_dir, NULL);
@@ -3459,7 +3864,7 @@ int main(void)
         if (search_busy > 0) kd = kh = ku = 0;       /* "Searching..." is up: ignore input for those frames */
 
         bool dlg = confirm_exit;                  /* START asks before leaving */
-        if (!dlg && (kd & KEY_START)) { confirm_exit = true; confirm_sel = 0; }
+        if (!dlg && !kb_open && (kd & KEY_START)) { confirm_exit = true; confirm_sel = 0; }   /* in the keyboard START = Search */
         if (quit_req) break;
 
         /* ---- sleep timer: elapsed wall-clock time, including time spent in system sleep ---- */
@@ -3489,6 +3894,8 @@ int main(void)
                 if (tp.px >= 42 && tp.px < 154) confirm_exit = false;
                 else if (tp.px >= 166 && tp.px < 278) quit_req = true;
             }
+        } else if (kb_open) {
+            kb_update(kd, kh, tp, &hold_up, &hold_down, &hold_left, &hold_right);
         } else if (wizard_open) {
             if (kd & KEY_A) wz_next();
             if (kd & KEY_B) wz_back();
@@ -3561,24 +3968,6 @@ int main(void)
             if (kd & KEY_TOUCH) handle_settings_touch(tp);
             if ((kh & KEY_TOUCH) && set_drag >= 0) slider_apply(set_drag, tp.px, tp.py);
             if (ku & KEY_TOUCH) set_drag = -1;
-        } else if (lyrics_open) {
-            if (kd & KEY_B) lyrics_open = false;
-            if (kd & KEY_SELECT) { settings_open = true; set_row = ROW_LY_SEARCH; }
-            if (kd & KEY_A) ly_search_now();
-            if (lyrics_state() == LY_READY && !lyrics_synced()) {          /* plain text scrolls by hand */
-                if (repeat_fire(kh, KEY_DUP, &hold_up))     ly_goal -= 1.0f;
-                if (repeat_fire(kh, KEY_DDOWN, &hold_down)) ly_goal += 1.0f;
-            }
-            if (repeat_seek(kh, KEY_DLEFT, &hold_left))   skip_seconds(-S.seek_step);
-            if (repeat_seek(kh, KEY_DRIGHT, &hold_right)) skip_seconds(+S.seek_step);
-            if (kd & KEY_TOUCH) {
-                if (tp.py < 40) { if (tp.px >= 244) lyrics_open = false; }
-                else if (tp.py >= CTRL_TOP) handle_ctrl_tap(tp.px, tp.py);
-                else if (tp.py >= 112 && tp.py < 144 && lyrics_state() != LY_READY) ly_search_now();
-                else if (tp.py >= 150 && tp.py < 182) { settings_open = true; set_row = ROW_LY_SEARCH; }
-            }
-            if ((kh & KEY_TOUCH) && slider_drag) slider_frac = frac_from_px(tp.px);
-            if ((ku & KEY_TOUCH) && slider_drag) { seek_to(slider_frac); slider_drag = false; }
         } else {
             if (kd & KEY_SELECT) { settings_open = true; set_row = 0; }
 
@@ -3589,7 +3978,10 @@ int main(void)
                 else if (audio_is_paused()) { audio_resume(); apply_lid(); }
                 else if (!audio_is_active()) toggle_play();
             }
-            if ((kd & KEY_B) && audio_is_active() && !audio_is_paused()) { audio_pause(); apply_lid(); }
+            if (kd & KEY_B) {
+                if (lyrics_open) lyrics_open = false;
+                else if (audio_is_active() && !audio_is_paused()) { audio_pause(); apply_lid(); }
+            }
             if ((kd & KEY_X) && sel < L.n && !L.e[sel].is_dir) queue_add_from_list(sel, true);
             if ((kd & KEY_Y) && sel < L.n && !L.e[sel].is_dir) queue_add_from_list(sel, false);
             if ((kd & KEY_ZL) && sel < L.n && !L.e[sel].is_dir) { char fp[256]; entry_relative_path(&L.e[sel], fp, sizeof fp); favorite_toggle(fp); }
@@ -3640,7 +4032,7 @@ int main(void)
                 else activate(row);
             }
             if ((kh & KEY_TOUCH) && slider_drag) slider_frac = frac_from_px(tp.px);
-            if ((ku & KEY_TOUCH) && slider_drag) { seek_to(slider_frac); slider_drag = false; }
+            if ((ku & KEY_TOUCH) && slider_drag) { slider_frac = frac_from_px(tp.px); seek_to(slider_frac); slider_drag = false; }
             if (ku & KEY_TOUCH) touch_in_list = false;
             if (kb_returned) {                       /* the system keyboard was just shown */
                 kb_returned = false;
@@ -3664,7 +4056,10 @@ int main(void)
         if (S.show_batt) { if (--batt_timer <= 0) { batt_poll(); batt_timer = S.saver ? 300 : 120; } }   /* every ~2 s (5 s in Battery saver) */
         resume_tick();
         lyrics_pump();                                              /* adopt a finished background lookup */
-        if (lyrics_open && track_loaded && strcmp(ly_asked, cur_path) != 0) lyrics_ask(false);   /* song changed */
+        if (track_loaded && strcmp(ly_asked, cur_path) != 0) {
+            if (S.ly_search) lyrics_ask(false);                       /* prefetch while the song plays */
+            else if (lyrics_open) lyrics_ask(false);
+        }
 
         {   /* bottom-screen page change -> soft cross-fade (none in Battery saver) */
             const int bk = bot_state_key();
@@ -3696,13 +4091,12 @@ int main(void)
         C2D_SceneBegin(bot);
         bg_gradient(BOT_W);
         draw_frame();
-        draw_wallpaper_accents(BOT_W, SCR_H);
         if (search_busy > 0) draw_search_busy();
         else if (confirm_exit) draw_exit_confirm();
+        else if (kb_open) draw_keyboard();
         else if (wizard_open) draw_wizard_bottom();
         else if (settings_open) draw_settings();
         else if (queue_open) draw_queue();
-        else if (lyrics_open) draw_lyrics_bottom();
         else draw_browser();
         draw_toast();
         if (bot_fade > 0.01f) {                                   /* page transition: fade in from the background */
@@ -3723,6 +4117,7 @@ int main(void)
     if (S.resume && track_loaded && (audio_is_active() || resume_pending)) resume_save(cur_pos_ms());
     if (audio_ok) { audio_stop(); audio_exit(); }
     lyrics_exit();
+    lyfont_exit();
     if (ptm_ok) ptmuExit();
     if (mcu_ok) mcuHwcExit();
     art_shutdown();
