@@ -13,9 +13,8 @@
 
 static C3D_Tex           g_tex;
 static bool              g_ok;
-static Tex3DS_SubTexture g_sub[96];
-static C2D_Image         g_img[96];
-static int               g_nchars;
+static Tex3DS_SubTexture g_sub[LYF_NGLYPH];
+static C2D_Image         g_img[LYF_NGLYPH];
 
 static u32 morton_interleave(u32 x, u32 y)
 {
@@ -45,9 +44,7 @@ bool lyfont_init(void)
     C3D_TexSetFilter(&g_tex, GPU_LINEAR, GPU_LINEAR);
     C3D_TexSetWrap(&g_tex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
 
-    g_nchars = (int)strlen(LYF_CHARS);
-    if (g_nchars > 96) g_nchars = 96;
-    for (int i = 0; i < g_nchars; i++) {
+    for (int i = 0; i < LYF_NGLYPH; i++) {
         const float x0 = (float)((i % LYF_COLS) * LYF_CW), y0 = (float)((i / LYF_COLS) * LYF_CH);
         g_sub[i].width = LYF_CW;
         g_sub[i].height = LYF_CH;
@@ -77,13 +74,34 @@ static int glyph_of(char c)
     return (p && c) ? (int)(p - LYF_CHARS) : -1;
 }
 
+static int glyph_of_cp(unsigned cp)                              /* accented letters and inverted marks (lyf_ext) */
+{
+    for (int i = 0; i < LYF_NGLYPH - LYF_NASCII; i++)
+        if (lyf_ext[i] == cp) return LYF_NASCII + i;
+    return -1;
+}
+
+/* letter + combining mark (U+0301 acute, U+0303 tilde, U+0308 diaeresis) -> precomposed code point, 0 = no such glyph */
+static unsigned compose(char base, unsigned mark)
+{
+    static const char           V[] = "aeiouAEIOU";
+    static const unsigned short A[] = { 0xE1, 0xE9, 0xED, 0xF3, 0xFA, 0xC1, 0xC9, 0xCD, 0xD3, 0xDA };
+    if (mark == 0x301 && base && strchr(V, base)) return A[strchr(V, base) - V];
+    if (mark == 0x303 && (base == 'n' || base == 'N')) return base == 'n' ? 0xF1 : 0xD1;
+    if (mark == 0x308 && (base == 'u' || base == 'U')) return base == 'u' ? 0xFC : 0xDC;
+    return 0;
+}
+
 /* UTF-8 -> glyph indices. Returns the count, or -1 when something has no glyph. */
 static int decode(const char *s, int *out)
 {
     int n = 0;
+    char base = 0;                                              /* previous character if it was a plain ASCII letter */
     for (const unsigned char *p = (const unsigned char *)s; *p; ) {
         const char *rep = NULL;
         char one[2] = { 0, 0 };
+        const char prev = base;
+        base = 0;
         if (*p < 0x80) {
             char c = (char)*p++;
             if (c == '\t' || c == '\r' || c == '\n') c = ' ';
@@ -95,6 +113,7 @@ static int decode(const char *s, int *out)
             if (c == '}') c = ')';
             one[0] = c;                                          /* lower case stays lower case */
             rep = one;
+            if (isalpha((unsigned char)c)) base = c;
         } else if (p[0] == 0xE2 && p[1] == 0x80) {
             const unsigned char k = p[2];
             if (k == 0x98 || k == 0x99) rep = "'";
@@ -103,8 +122,25 @@ static int decode(const char *s, int *out)
             else if (k == 0xA6) rep = "...";
             else return -1;
             p += 3;
-        } else if (p[0] == 0xC2 && p[1] == 0xA0) { rep = " "; p += 2; }
-        else return -1;                                         /* accents, other scripts: system font */
+        } else if (p[0] >= 0xC2 && p[0] <= 0xDF && (p[1] & 0xC0) == 0x80) {      /* two-byte sequence: Latin-1 range, combining marks */
+            const unsigned cp = ((unsigned)(p[0] & 0x1F) << 6) | (unsigned)(p[1] & 0x3F);
+            p += 2;
+            if (cp == 0xA0) rep = " ";
+            else if (cp == 0xAB || cp == 0xBB) rep = "\"";                /* guillemets */
+            else if (cp >= 0x300 && cp <= 0x36F) {                       /* decomposed accent: merge it into the letter before it */
+                const unsigned pre = compose(prev, cp);
+                const int g = (pre && n > 0) ? glyph_of_cp(pre) : -1;
+                if (g < 0) return -1;
+                out[n - 1] = g;
+                continue;
+            } else {
+                const int g = glyph_of_cp(cp);
+                if (g < 0 || n >= LYF_MAXG) return -1;
+                out[n++] = g;
+                continue;
+            }
+        }
+        else return -1;                                         /* other scripts / symbols: system font */
 
         for (; *rep; rep++) {
             const int g = glyph_of(*rep);
@@ -128,6 +164,24 @@ float lyfont_width(const char *s, float sc)
     float w = 0.0f;
     for (int i = 0; i < n; i++) w += (float)lyf_adv[g[i]];
     return w * sc;
+}
+
+const char *lyfont_fit(const char *s, float sc, float maxw, char *out, size_t cap)
+{
+    if (lyfont_width(s, sc) <= maxw) return s;
+    size_t len = strlen(s);
+    if (len > cap - 4) {
+        len = cap - 4;
+        while (len && ((unsigned char)s[len] & 0xC0) == 0x80) len--;
+    }
+    memcpy(out, s, len);
+    out[len] = 0;
+    while (len) {                                                /* drop whole characters until "text..." fits */
+        do len--; while (len && ((unsigned char)out[len] & 0xC0) == 0x80);
+        memcpy(out + len, "...", 4);
+        if (lyfont_width(out, sc) <= maxw) break;
+    }
+    return out;
 }
 
 void lyfont_draw(const char *s, float x, float yc, float sc, u32 color, u32 align, float z)

@@ -2052,14 +2052,17 @@ static void ly_draw_text(const char *s, float x, float y, float sc, u32 color, u
 }
 
 /* Gothic lyrics typeface (Settings > Lyrics > Lyrics font). Lyrics screen only: drawn from the glyph atlas in
- * lyfont.c; a line it cannot show (accents, other scripts, too long) returns false and the caller uses the
- * system font, so no lyric is ever lost. yc = vertical centre of the letters. */
+ * lyfont.c. A line is shrunk to fit (and, only past LY_GOTHIC_MIN, cut with "...") so English and Spanish lines look
+ * alike; only a line holding a character the atlas has no glyph for (other scripts, symbols) returns false and the
+ * caller uses the system font, so no lyric is ever lost. yc = vertical centre of the letters. */
+#define LY_GOTHIC_MIN 0.36f
 static bool ly_gothic_line(const char *s, float x, float yc, float sc, Rgb col, float glow, float maxw)
 {
     if (S.ly_font != 0 || !lyfont_ok() || !lyfont_can(s)) return false;
+    char cut[320];
     const float w = lyfont_width(s, sc);
     if (w > maxw) sc *= maxw / w;
-    if (sc < 0.42f) return false;
+    if (sc < LY_GOTHIC_MIN) { sc = LY_GOTHIC_MIN; s = lyfont_fit(s, sc, maxw, cut, sizeof cut); }
     if (glow > 0.01f && !S.saver) {                                   /* soft halo: four offset copies */
         static const float ox[4] = { 1.5f, -1.5f, 0.0f, 0.0f }, oy[4] = { 0.0f, 0.0f, 1.5f, -1.5f };
         const u32 g = C(mix_rgb(th_bg, th_glow, (int)(110.0f * glow)));

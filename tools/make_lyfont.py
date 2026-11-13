@@ -9,17 +9,19 @@ Needs Pillow.  Usage: python3 tools/make_lyfont.py [preview.png]"""
 import sys, io, math
 from PIL import Image, ImageDraw
 
-CW, CH = 32, 48                  # atlas cell, px
-COLS = 16                        # 16 x 5 cells -> 512 x 240, padded to 512 x 256
-AW, AH = 512, 256
+CW, CH = 32, 56                  # atlas cell, px (8 px of headroom above the capitals for accents)
+COLS = 16                        # 16 x 6 cells -> 512 x 336, padded to 512 x 512 (textures must be a power of two)
+AW, AH = 512, 512
 SS = 8                           # supersampling
 K = 0.30                         # design unit -> px
 SB = 1.5                         # side bearing each side of the ink, px (spacing is measured from the ink, so it is even)
 BASE, XTOP, CAPTOP = 100, 44, 14 # baseline / x-height / cap height (design units)
-OY = 5.0                         # design y=0 sits OY px below the cell top
+OY = 13.0                        # design y=0 sits OY px below the cell top
 NIB_L, NIB_ANG = 21.0, 38.0      # nib length (units) and angle
 HAIR = 6.0                       # hairline width (units)
-CHARS = " abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,!?'\"-:;()/&"
+CHARS = " abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,!?'\"-:;()/&"   # ASCII glyphs
+EXT = "\u00e1\u00e9\u00ed\u00f3\u00fa\u00f1\u00fc\u00c1\u00c9\u00cd\u00d3\u00da\u00d1\u00dc\u00bf\u00a1"   # a-acute e i o u, n-tilde, u-diaeresis, capitals, inverted ? !
+ORDER = CHARS + EXT              # glyph index = position in ORDER
 
 _n = (math.cos(math.radians(NIB_ANG)), -math.sin(math.radians(NIB_ANG)))
 
@@ -150,6 +152,47 @@ def build():
     add(')', 28, [H((6, 6), (19, 34), (19, 80), (6, 114), w=9)])
     add('/', 34, [H((28, 6), (6, 112), w=8)])
     add('&', 58, [P((48, BASE), (14, 58), (10, 30), (22, C0), (34, 24), (30, 40), (10, 74), (14, 92), (30, BASE), (44, 84), (50, 66))])
+
+    # ------------------------------------------- Spanish: accents, tilde, diaeresis, inverted marks
+    # Marks use the same primitives as the letters (pointed wedge like the apostrophe, diamond dots like i / j, a
+    # faceted pen wave for the tilde); capitals carry them higher (dy) so they clear the flags.
+    def acute(cx, dy=0):
+        return [T((cx - 7, 33 + dy), (cx + 5, 9 + dy), (cx + 14, 12 + dy), (cx + 3, 37 + dy))]
+
+    def diaer(cx, dy=0):
+        return [dia(cx - 9, 24 + dy, 6.5), dia(cx + 9, 24 + dy, 6.5)]
+
+    def tilde(cx, dy=0):
+        top = [(-16, 25), (-7, 14), (2, 21), (14, 11)]            # a faceted two-hump ribbon, pointed at both ends
+        pts = [(cx + x, y + dy) for x, y in top] + [(cx + x + 1, y + dy + 10) for x, y in reversed(top)]
+        return [T(*pts)]
+
+    def rot(prims, w):                       # 180 degree turn inside the capital box (the nib is symmetric, so weight is kept)
+        f = lambda q: (w - q[0], C0 + BASE - q[1])
+        out = []
+        for pr in prims:
+            out.append((pr[0], [f(q) for q in pr[1]]) + tuple(pr[2:]))
+        return out
+
+    def comp(ch, base, mark, cx, dy):
+        add(ch, W[base], g[base] + mark(cx, dy))
+
+    comp('\u00e1', 'a', acute, 23, 0)
+    comp('\u00e9', 'e', acute, 22, 0)
+    add('\u00ed', W['i'], stem(14, XTOP, BASE) + acute(15, 0))          # dotless i: the acute replaces the dot
+    comp('\u00f3', 'o', acute, 22, 0)
+    comp('\u00fa', 'u', acute, 24, 0)
+    comp('\u00f1', 'n', tilde, 24, 0)
+    comp('\u00fc', 'u', diaer, 24, 0)
+    comp('\u00c1', 'A', acute, 28, -32)
+    comp('\u00c9', 'E', acute, 23, -32)
+    comp('\u00cd', 'I', acute, 14, -32)
+    comp('\u00d3', 'O', acute, 29, -32)
+    comp('\u00da', 'U', acute, 29, -32)
+    comp('\u00d1', 'N', tilde, 29, -32)
+    comp('\u00dc', 'U', diaer, 29, -32)
+    add('\u00bf', W['?'], rot(g['?'], W['?']))
+    add('\u00a1', W['!'], rot(g['!'], W['!']))
     return g, W
 
 
@@ -167,10 +210,10 @@ def stamp_pen(d, pts, p):
 
 def render():
     g, W = build()
-    assert len(CHARS) <= 96 and all(c in g for c in CHARS), [c for c in CHARS if c not in g]
+    assert len(ORDER) <= 96 and COLS * (AH // CH) >= len(ORDER) and all(c in g for c in ORDER), [c for c in ORDER if c not in g]
     atlas = Image.new('L', (AW, AH), 0)
     adv = []
-    for i, ch in enumerate(CHARS):
+    for i, ch in enumerate(ORDER):
         w = W[ch]
         cell = Image.new('L', (CW * SS, CH * SS), 0)
         d = ImageDraw.Draw(cell)
@@ -207,6 +250,8 @@ def emit(atlas, adv, path):
         f.write('#define LYF_CW %d\n#define LYF_CH %d\n#define LYF_COLS %d\n#define LYF_AW %d\n#define LYF_AH %d\n' % (CW, CH, COLS, AW, AH))
         f.write('#define LYF_YC %.2ff\n' % yc)
         f.write('#define LYF_CHARS "%s"\n' % CHARS.replace('\\', '\\\\').replace('"', '\\"'))
+        f.write('#define LYF_NASCII %d\n#define LYF_NGLYPH %d\n' % (len(CHARS), len(ORDER)))
+        f.write('static const unsigned short lyf_ext[] = { %s };   /* code points of the glyphs after the ASCII ones */\n' % ', '.join('0x%04X' % ord(c) for c in EXT))
         f.write('static const unsigned char lyf_adv[] = { %s };\n' % ', '.join(map(str, adv)))
         f.write('static const unsigned char lyf_png[] = {\n')
         for i in range(0, len(data), 16):
@@ -219,10 +264,10 @@ def preview(atlas, adv, path, lines, scales, bg=(6, 12, 24)):
     img = Image.new('RGB', (400, 240), bg)
     y = 8
     for (text, col), s in zip(lines, scales):
-        w = sum(adv[CHARS.index(c)] for c in text) * s
+        w = sum(adv[ORDER.index(c)] for c in text) * s
         x = 200 - w / 2
         for c in text:
-            i = CHARS.index(c)
+            i = ORDER.index(c)
             gx, gy = (i % COLS) * CW, (i // COLS) * CH
             cell = atlas.crop((gx, gy, gx + CW, gy + CH)).resize((max(1, int(CW * s)), max(1, int(CH * s))), Image.BILINEAR)
             img.paste(Image.new('RGB', cell.size, col), (int(round(x + (adv[i] - CW) * 0.5 * s)), y), cell)   # same placement as lyfont_draw
@@ -238,8 +283,9 @@ if __name__ == '__main__':
     print('atlas png bytes:', n)
     out = sys.argv[1] if len(sys.argv) > 1 else '/tmp/lyf_preview.png'
     atlas.save('/tmp/lyf_atlas.png')
-    sheet = Image.new('RGB', (COLS * CW * 3, 5 * CH * 3), (6, 12, 24))
-    sheet.paste(Image.merge('RGB', (atlas.crop((0, 0, COLS * CW, 5 * CH)),) * 3).resize((COLS * CW * 3, 5 * CH * 3), Image.LANCZOS), (0, 0))
+    ROWS = (len(ORDER) + COLS - 1) // COLS
+    sheet = Image.new('RGB', (COLS * CW * 3, ROWS * CH * 3), (6, 12, 24))
+    sheet.paste(Image.merge('RGB', (atlas.crop((0, 0, COLS * CW, ROWS * CH)),) * 3).resize((COLS * CW * 3, ROWS * CH * 3), Image.LANCZOS), (0, 0))
     sheet.save('/tmp/lyf_sheet.png')
     preview(atlas, adv, out, [("I can't stop the feeling", (150, 205, 255)), ("Don't stop me now, I'm having such a good time", (205, 215, 230)),
                               ("abcdefghijklm nopqrstuvwxyz", (205, 215, 230)), ("ABCDEFGHIJKLM NOPQRSTUVWXYZ 0123456789", (205, 215, 230))],
