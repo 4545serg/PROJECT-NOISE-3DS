@@ -103,7 +103,8 @@ Four tabs:
     gain, and A (or Left / Right past the first / last band) leaves the sliders.
 - **Player** - **Visualizer** (Cover / LED Spectrum / Scope / VU Deck - the three visualizers are full-width,
   retro car-stereo style displays), **Cover fade**, **Track info** (elapsed, length, format and bitrate),
-  **Remember song** (reopens on the last song and position) and **Skip length** (5 / 10 / 15 / 30 s).
+  **Remember song** (reopens on the last song and position), **Skip length** (5 / 10 / 15 / 30 s) and
+  **Play lid closed** (keeps the music going when you shut the lid; see below).
 - **General** - **Clock** (off / 12-hour / 24-hour), **Battery** (on / off) with a **Battery style** (Icon /
   Percent), **Battery saver**, a **Sleep timer** switch with a 5 / 10 / 15 / 30 / 45 / 60-minute duration (the
   countdown shows on the top screen; changing the duration restarts a running timer), **Show setup guide** and
@@ -274,3 +275,11 @@ tools/               get_deps.sh, make_assets.py, make_cover.py
 ```
 
 Licenses and attribution: see `LICENSE` and `THIRD_PARTY_NOTICES.md`.
+
+### Play with the lid closed
+
+Settings > Player > **Play lid closed** (off by default, saved as `lid_play`). While it is on and a song is playing,
+the console is not allowed to sleep, so closing the lid keeps the music going (L / R still skip). The screens are
+switched off while the lid is shut and come back when you open it. Pausing or stopping (or the sleep timer ending)
+lets the console sleep as normal. With the switch off, closing the lid pauses and sleeps like before. Playing with
+the lid closed uses more battery than system sleep, so turn it off when you do not need it.

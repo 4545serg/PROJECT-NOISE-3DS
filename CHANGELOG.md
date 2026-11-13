@@ -1,3 +1,16 @@
+## Play with the lid closed
+
+- **Settings > Player > Play lid closed** (default off, saved as `lid_play`): while a song is playing the console is kept from sleeping, so music continues with the lid shut; L / R skip still works. Screens are turned off while closed and restored on opening.
+- Sleep is allowed again as soon as playback is paused, stopped or the sleep timer ends. The player settings card now has six rows.
+
+## Playback & lyrics fixes
+
+- **Seek slider**: dragging now follows the finger and seeks once on release from every bottom-screen state (it used to stay stuck when started from Up Next).
+- **Bold lyrics**: a stray `\n` in the draw code broke the build; Bold is now one extra offset pass (cheaper on Old 3DS).
+- **Compact lyrics**: text stays vertically centred at the smaller size on plain-text lyrics.
+- **Lyrics font**: the selection applies to every displayed lyric line.
+- **Animated lyrics** (Settings > Lyrics): the ON/OFF switch now actually toggles and is saved as `ly_animated`; OFF snaps lines and scrolls plain lyrics a whole line at a time.
+
 ## Custom keyboard, keyboard font, smoother library scrolling
 
 - **Gothic on-screen keyboard** replaces the system keyboard for song search (touch, or D-pad + A / B backspace / X shift / Y or START search / SELECT cancel). Same dark rounded keys, accent rim and glow as the rest of the app; letters + digits/symbols pages, one-shot shift, hold Backspace to repeat, 40-character limit, same "not blank" rule as before.

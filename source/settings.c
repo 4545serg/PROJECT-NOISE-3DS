@@ -102,6 +102,7 @@ void settings_defaults(Settings *s)
     s->saver = false;
     s->show_info = true;
     s->resume = true;
+    s->lid_play = false;
     s->ly_search = true;
     s->ly_download = true;
     s->ly_offline = false;
@@ -187,6 +188,8 @@ void settings_load(Settings *s)
             s->show_info = atoi(value) != 0;
         else if (!strcmp(key, "resume"))
             s->resume = atoi(value) != 0;
+        else if (!strcmp(key, "lid_play"))
+            s->lid_play = atoi(value) != 0;
         else if (!strcmp(key, "ly_search"))
             s->ly_search = atoi(value) != 0;
         else if (!strcmp(key, "ly_download"))
@@ -281,6 +284,7 @@ bool settings_save(const Settings *s)
     fprintf(f, "saver=%d\n", s->saver ? 1 : 0);
     fprintf(f, "show_info=%d\n", s->show_info ? 1 : 0);
     fprintf(f, "resume=%d\n", s->resume ? 1 : 0);
+    fprintf(f, "lid_play=%d\n", s->lid_play ? 1 : 0);
     fprintf(f, "ly_search=%d\n", s->ly_search ? 1 : 0);
     fprintf(f, "ly_download=%d\n", s->ly_download ? 1 : 0);
     fprintf(f, "ly_offline=%d\n", s->ly_offline ? 1 : 0);

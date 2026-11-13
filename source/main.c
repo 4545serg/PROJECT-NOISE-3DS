@@ -56,7 +56,7 @@
 enum {                         /* settings rows, grouped in four pages */
     ROW_PRESET, ROW_OLED, ROW_GLOWCOL, ROW_GLOW, ROW_DYN, ROW_KB_FONT, ROW_WALLPAPER, /* Look    */
     ROW_EQMAN, ROW_EQPRE, ROW_B0, ROW_B1, ROW_B2, ROW_B3, ROW_B4,              /* Audio   */
-    ROW_DISPLAY, ROW_FADE, ROW_INFO, ROW_RESUME, ROW_SEEK,                     /* Player  */
+    ROW_DISPLAY, ROW_FADE, ROW_INFO, ROW_RESUME, ROW_SEEK, ROW_LID,            /* Player  */
     ROW_LY_SEARCH, ROW_LY_DL, ROW_LY_OFFLINE, ROW_LY_SYNC, ROW_LY_ANIM, ROW_LY_FONT, ROW_LY_CLEAR, /* Lyrics */
     ROW_CLOCK, ROW_BATT, ROW_BATTSTYLE, ROW_SAVER,                             /* General */
     ROW_SLEEP_ENABLE, ROW_SLEEP_TIMER, ROW_GUIDE, ROW_EXIT,
@@ -67,13 +67,13 @@ enum {                         /* settings rows, grouped in four pages */
  * tabs (the Sound tab has its own layout); CARD_SETUP is the single combined page of the first-run setup. */
 enum { CARD_LOOK, CARD_SOUND, CARD_PLAYER, CARD_GENERAL, CARD_SETUP, CARD_LYRICS, CARD_COUNT };
 static const int   ROWS_LOOK[]    = { ROW_OLED, ROW_GLOWCOL, ROW_GLOW, ROW_DYN, ROW_KB_FONT };
-static const int   ROWS_PLAYER[]  = { ROW_DISPLAY, ROW_FADE, ROW_INFO, ROW_RESUME, ROW_SEEK };
+static const int   ROWS_PLAYER[]  = { ROW_DISPLAY, ROW_FADE, ROW_INFO, ROW_RESUME, ROW_SEEK, ROW_LID };
 static const int   ROWS_GENERAL[] = { ROW_CLOCK, ROW_BATT, ROW_BATTSTYLE, ROW_SAVER, ROW_SLEEP_ENABLE, ROW_SLEEP_TIMER, ROW_GUIDE, ROW_EXIT };
 static const int   ROWS_SETUP[]   = { ROW_PRESET, ROW_GLOW, ROW_CLOCK, ROW_BATT };
 static const int   ROWS_LYRICS[]  = { ROW_LY_SEARCH, ROW_LY_DL, ROW_LY_OFFLINE, ROW_LY_SYNC, ROW_LY_ANIM, ROW_LY_FONT, ROW_LY_CLEAR };
 static const int  *CARD_ROWS[CARD_COUNT] = { ROWS_LOOK, NULL, ROWS_PLAYER, ROWS_GENERAL, ROWS_SETUP, ROWS_LYRICS };
-static const int   CARD_LEN[CARD_COUNT]  = { 5, 0, 5, 8, 4, 7 };
-static const float CARD_ROWH[CARD_COUNT] = { 29.0f, 0.0f, 28.0f, 19.5f, 25.0f, 25.0f };
+static const int   CARD_LEN[CARD_COUNT]  = { 5, 0, 6, 8, 4, 7 };
+static const float CARD_ROWH[CARD_COUNT] = { 29.0f, 0.0f, 25.0f, 19.5f, 25.0f, 25.0f };
 #define PAGES 5
 static const int   PAGE_CARD[PAGES]      = { CARD_LOOK, CARD_SOUND, CARD_PLAYER, CARD_LYRICS, CARD_GENERAL };
 static const int   TAB_FIRST[PAGES]      = { ROW_OLED, ROW_EQMAN, ROW_DISPLAY, ROW_LY_SEARCH, ROW_CLOCK };
@@ -863,7 +863,7 @@ static int  row_page(int r)      { return r < ROW_EQMAN ? 0 : (r < ROW_DISPLAY ?
 static bool is_switch_row(int r)
 {
     return r == ROW_BATT || r == ROW_SLEEP_ENABLE || r == ROW_EQMAN || r == ROW_OLED || r == ROW_DYN ||
-           r == ROW_INFO || r == ROW_RESUME || r == ROW_SAVER ||
+           r == ROW_INFO || r == ROW_RESUME || r == ROW_LID || r == ROW_SAVER ||
            r == ROW_LY_SEARCH || r == ROW_LY_DL || r == ROW_LY_OFFLINE || r == ROW_LY_SYNC || r == ROW_LY_ANIM;
 }
 static bool is_band_row(int r)   { return r >= ROW_B0 && r <= ROW_B4; }
@@ -877,7 +877,26 @@ static int card_pos(int card, int row)            /* index of `row` inside a car
 }
 
 static void eq_push(void) { audio_set_eq(S.eq); }
-static void apply_lid(void) { aptSetSleepAllowed(true); }
+/* Sleep is only blocked while a song is actually playing and "Play lid closed" is on; paused / stopped
+ * (or the setting off) lets the console sleep normally when the lid closes. */
+static bool lid_block_sleep(void) { return S.lid_play && audio_is_active() && !audio_is_paused(); }
+static void apply_lid(void) { aptSetSleepAllowed(!lid_block_sleep()); }
+
+/* With sleep blocked the lid no longer switches the screens off by itself, so do it here to save battery. */
+static bool lcd_ok = false, lcd_off = false;
+static void lcd_set(bool off)
+{
+    if (!lcd_ok || off == lcd_off) return;
+    if (off) GSPLCD_PowerOffBacklight(GSPLCD_SCREEN_BOTH);
+    else     GSPLCD_PowerOnBacklight(GSPLCD_SCREEN_BOTH);
+    lcd_off = off;
+}
+static bool lid_closed(void)
+{
+    u8 st = 1;                                   /* 1 = open (also the answer if PTM is unavailable) */
+    if (ptm_ok && R_SUCCEEDED(PTMU_GetShellState(&st))) return st == 0;
+    return false;
+}
 
 static const int SLEEP_CHOICES[6] = { 5, 10, 15, 30, 45, 60 };
 static int sleep_choice_index(void) { for (int i=0;i<6;i++) if (S.sleep_minutes == SLEEP_CHOICES[i]) return i; return 2; }
@@ -896,6 +915,7 @@ static void apt_lid_hook(APT_HookType hook, void *param)
 {
     (void)param;
     if (hook == APTHOOK_ONSLEEP) {
+        lcd_off = false;                          /* the system handles the screens across sleep */
         paused_for_sleep = audio_is_active() && !audio_is_paused();
         if (paused_for_sleep) audio_pause();
     } else if (hook == APTHOOK_ONWAKEUP) {
@@ -1065,6 +1085,10 @@ static void set_adjust(int dir)
     } else if (set_row == ROW_RESUME) {
         S.resume = !S.resume;
         if (!S.resume) remove(RESUME_PATH);
+    } else if (set_row == ROW_LID) {
+        S.lid_play = !S.lid_play;
+        apply_lid();
+        toast(S.lid_play ? "Plays with lid closed" : "Lid closed: sleeps");
     } else if (set_row == ROW_SAVER) {
         S.saver = !S.saver;
         toast(S.saver ? "Battery saver on" : "Battery saver off");
@@ -1076,6 +1100,8 @@ static void set_adjust(int dir)
         S.ly_offline = !S.ly_offline;
     } else if (set_row == ROW_LY_SYNC) {
         S.ly_sync = !S.ly_sync;
+    } else if (set_row == ROW_LY_ANIM) {
+        S.ly_animated = !S.ly_animated;
     } else if (set_row == ROW_LY_FONT) {
         S.ly_font = (S.ly_font + dir + 4) % 4;
     } else if (set_row == ROW_KB_FONT) {
@@ -2042,9 +2068,8 @@ static void ly_draw_text(const char *s, float x, float y, float sc, u32 color, u
 {
     sc = ly_font_scale(sc);
     if (S.ly_font == 1) {
-        /* Bold style: two sub-pixel-offset passes using the same native 3DS font.
-         * This keeps the build self-contained while making the lyric face visibly heavier. */
-        draw_text(s, x + 0.65f, y, sc, color, align, maxw);\n        draw_text(s, x, y + 0.45f, sc, color, align, maxw);
+        /* Bold style: one extra sub-pixel-offset pass using the same native 3DS font (a second draw call only). */
+        draw_text(s, x + 0.75f, y, sc, color, align, maxw);
     }
     draw_text(s, x, y, sc, color, align, maxw);
 }
@@ -2157,14 +2182,15 @@ static void draw_lyrics_top(void)
             ly_goal = fmodf((float)(osGetTime() % (u64)60000) / 7000.0f, span);
             if (ly_goal > max_off) ly_goal = max_off;
         } else ly_goal = 0.0f;
-        if (!S.ly_animated || S.saver) ly_pos = ly_goal; else ly_pos += (ly_goal - ly_pos) * 0.08f;
+        if (!S.ly_animated || S.saver) ly_pos = ly_goal = floorf(ly_goal);   /* animation off: whole-line steps, no glide */
+        else ly_pos += (ly_goal - ly_pos) * 0.08f;
         for (int i = (int)floorf(ly_pos); i < n && i < (int)ly_pos + 9; i++) {
             const float y = 38.0f + ((float)i - ly_pos) * 23.0f;
             float a = fminf((y - 28.0f) / 12.0f, (206.0f - y) / 12.0f);
             if (a <= 0.02f) continue;
             if (a > 1.0f) a = 1.0f;
             if (!ly_gothic_line(lyrics_text(i), 200, y + 10.0f, 0.60f, mix_rgb(th_bg, th_tx, (int)(a * 255.0f)), 0.0f, 366.0f))
-                ly_draw_text(lyrics_text(i), 200, y, 0.50f, Ca(th_tx, a), C2D_AlignCenter, 366);
+                ly_draw_text(lyrics_text(i), 200, y + 14.0f * (0.50f - ly_font_scale(0.50f)), 0.50f, Ca(th_tx, a), C2D_AlignCenter, 366);
         }
         if (n > 7) {                                                   /* scroll position */
             rrect(391, 36, 4, 164, 2, 0.08f, cTrk);
@@ -2588,6 +2614,7 @@ static const char *row_label(int r)
     case ROW_DYN:          return "Album colors";
     case ROW_INFO:         return "Track info";
     case ROW_RESUME:       return "Remember song";
+    case ROW_LID:          return "Play lid closed";
     case ROW_SAVER:        return "Battery saver";
     case ROW_SLEEP_ENABLE: return "Sleep timer";
     case ROW_SLEEP_TIMER:  return "Timer length";
@@ -2634,6 +2661,7 @@ static bool row_switch_on(int r)
     if (r == ROW_DYN)          return S.dyn_color;
     if (r == ROW_INFO)         return S.show_info;
     if (r == ROW_RESUME)       return S.resume;
+    if (r == ROW_LID)          return S.lid_play;
     if (r == ROW_SAVER)        return S.saver;
     if (r == ROW_LY_SEARCH)    return S.ly_search;
     if (r == ROW_LY_DL)        return S.ly_download;
@@ -3836,6 +3864,7 @@ int main(void)
 
     mcu_ok = R_SUCCEEDED(mcuHwcInit());      /* battery percentage (optional) */
     ptm_ok = R_SUCCEEDED(ptmuInit());        /* charging state / fallback level (optional) */
+    lcd_ok = R_SUCCEEDED(gspLcdInit());      /* backlight control for lid-closed playback (optional) */
 
     art_set_default(placeholder_png, placeholder_png_len);
     art_queue(NULL, 0);                 /* show the logo cover until a song with art plays */
@@ -3865,6 +3894,24 @@ int main(void)
         bool dlg = confirm_exit;                  /* START asks before leaving */
         if (!dlg && !kb_open && (kd & KEY_START)) { confirm_exit = true; confirm_sel = 0; }   /* in the keyboard START = Search */
         if (quit_req) break;
+
+        /* ---- lid closed: keep the sleep-block state current, and blank / restore the screens ---- */
+        {
+            apply_lid();
+            bool closed = lid_block_sleep() && lid_closed();
+            lcd_set(closed);
+            if (closed) {                         /* nothing to see: skip drawing, keep audio + timers running */
+                if (audio_take_finished()) { if (S.repeat == 2) replay_current(); else next_track(false); follow_playing(); }
+                if (audio_take_error()) { snprintf(status_msg, sizeof status_msg, "Can't play this file"); apply_lid(); }
+                if (sleep_timer_active && osGetTime() >= sleep_timer_deadline) {
+                    sleep_timer_active = false; audio_stop(); apply_lid(); toast("Sleep timer ended");
+                }
+                if (kd & KEY_L) skip_prev();
+                if (kd & KEY_R) skip_next();
+                svcSleepThread(50 * 1000 * 1000LL);   /* 50 ms */
+                continue;
+            }
+        }
 
         /* ---- sleep timer: elapsed wall-clock time, including time spent in system sleep ---- */
         if (sleep_timer_active && osGetTime() >= sleep_timer_deadline) {
@@ -4030,8 +4077,6 @@ int main(void)
                 else if (row >= 0 && row < L.n && !L.e[row].is_dir && tp_start.px >= 272) { char fp[256]; entry_relative_path(&L.e[row], fp, sizeof fp); favorite_toggle(fp); }
                 else activate(row);
             }
-            if ((kh & KEY_TOUCH) && slider_drag) slider_frac = frac_from_px(tp.px);
-            if ((ku & KEY_TOUCH) && slider_drag) { slider_frac = frac_from_px(tp.px); seek_to(slider_frac); slider_drag = false; }
             if (ku & KEY_TOUCH) touch_in_list = false;
             if (kb_returned) {                       /* the system keyboard was just shown */
                 kb_returned = false;
@@ -4040,6 +4085,11 @@ int main(void)
             }
         }
 
+        if (slider_drag) {                       /* seek bar: follow the finger, seek once on release */
+            if (!track_loaded || cur.duration_ms == 0) slider_drag = false;
+            else if (kh & KEY_TOUCH) slider_frac = frac_from_px(tp.px);
+            else { seek_to(slider_frac); slider_drag = false; }
+        }
         if (vol_drag) { if (kh & KEY_TOUCH) vol_apply(tp.px); else vol_drag = false; }
 
         /* ---- auto-save theme/settings shortly after the last change ---- */
@@ -4112,11 +4162,14 @@ int main(void)
     settings_save(&S);
     if (favorites_dirty) favorites_save();
     aptUnhook(&lid_hook_cookie);
+    lcd_set(false);
+    aptSetSleepAllowed(true);
 
     if (S.resume && track_loaded && (audio_is_active() || resume_pending)) resume_save(cur_pos_ms());
     if (audio_ok) { audio_stop(); audio_exit(); }
     lyrics_exit();
     lyfont_exit();
+    if (lcd_ok) gspLcdExit();
     if (ptm_ok) ptmuExit();
     if (mcu_ok) mcuHwcExit();
     art_shutdown();

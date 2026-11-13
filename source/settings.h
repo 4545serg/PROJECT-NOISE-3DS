@@ -33,6 +33,7 @@ typedef struct {
     bool saver;                      /* battery saver: fewer effects, 30 fps drawing */
     bool show_info;                  /* music information (format / bitrate / times) */
     bool resume;                     /* remember the last song + position */
+    bool lid_play;                   /* keep playing when the lid is closed (blocks system sleep while music plays) */
     bool ly_search;                  /* lyrics: look online automatically when the lyrics screen opens */
     bool ly_download;                /* lyrics: keep downloaded lyrics in the SD cache */
     bool ly_offline;                 /* lyrics: never use the network, cache only */
