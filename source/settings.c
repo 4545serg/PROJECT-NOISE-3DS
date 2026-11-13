@@ -9,7 +9,7 @@
 typedef struct { const char *name; u32 bg, text, accent, select; } Preset;
 
 static const Preset presets[PRESET_COUNT] = {
-    { "Noise",   0x040A14, 0xEAF2FF, 0x2F8CFF, 0x15366A },   /* the logo blue: default */
+    { "Noise",   0x08030F, 0xF4EEFF, 0xA020FF, 0x35105A },   /* Project Noise purple: default */
     { "Neon",    0x030806, 0xEEF4F2, 0x24FF68, 0x16502C },
     { "Emerald", 0x0A1410, 0xE8F6EE, 0x35D07F, 0x1B3A2C },
     { "Ocean",   0x0B1720, 0xE8F4F8, 0x39B8D6, 0x183A49 },
@@ -231,7 +231,7 @@ void settings_load(Settings *s)
     if (s->display_mode < 0 || s->display_mode > 3) s->display_mode = 0;
     if (s->wallpaper < 0 || s->wallpaper > 4) s->wallpaper = 0;
     if (s->ly_font < 0 || s->ly_font > 3) s->ly_font = 0;
-    if (s->ly_anim_style < 0 || s->ly_anim_style > 3) s->ly_anim_style = 0;
+    if (s->ly_anim_style < 0 || s->ly_anim_style > 7) s->ly_anim_style = 0;
     if (s->kb_font < 0 || s->kb_font > 3) s->kb_font = 0;
     if (s->glow_color < 0 || s->glow_color >= GLOWCOL_COUNT) s->glow_color = 0;
     if (s->batt_style < 0 || s->batt_style > 1) s->batt_style = 0;

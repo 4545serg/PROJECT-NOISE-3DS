@@ -1,6 +1,15 @@
 # PROJECT NOISE - Neon UI
 
-Default theme is **Neon** (black, neon green `#24FF68`); the other themes recolour the same layout.
+Default theme is **Noise** (near-black purple `#08030F`, soft white `#F4EEFF`, electric violet `#A020FF`); the other themes recolour the same layout. Branding uses the crown / chain / purple-flame artwork and the creator credit **MADE BY GRIMZZZZ**.
+
+Brand assets in `resources/`:
+- `icon.png`: 48x48 3DS app icon
+- `banner.png`: 256x128 HOME Menu banner
+- `cover.png`: 128x128 matching fallback cover
+- `boot_top.png`: 800x480 top-screen boot artwork (4:3 pixel-doubled 400x240)
+- `boot_bottom.png`: 640x480 bottom-screen boot artwork (pixel-doubled 320x240)
+
+The boot images are included as ready-to-integrate artwork; this update does not alter startup flow or add a new boot-screen renderer.
 
 ## Bottom screen (`source/main.c`)
 - Thin neon outline around the screen; faint wallpaper accents behind it (Settings > Appearance).
