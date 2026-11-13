@@ -2111,10 +2111,10 @@ static bool ly_gothic_line(const char *s, float x, float yc, float sc, Rgb col, 
     const float w = lyfont_width(s, sc);
     if (w > maxw) sc *= maxw / w;
     if (sc < LY_GOTHIC_MIN) { sc = LY_GOTHIC_MIN; s = lyfont_fit(s, sc, maxw, cut, sizeof cut); }
-    if (glow > 0.01f && !S.saver) {                                   /* soft halo: four offset copies */
-        static const float ox[4] = { 1.5f, -1.5f, 0.0f, 0.0f }, oy[4] = { 0.0f, 0.0f, 1.5f, -1.5f };
-        const u32 g = C(mix_rgb(th_bg, th_glow, (int)(110.0f * glow)));
-        for (int i = 0; i < 4; i++) lyfont_draw(s, x + ox[i], yc + oy[i], sc, g, C2D_AlignCenter, text_z - 0.01f);
+    if (glow > 0.01f && !S.saver) {                                   /* lightweight two-pass halo */
+        const u32 g = Ca(mix_rgb(th_bg, th_glow, 110), glow * 0.72f);
+        lyfont_draw(s, x + 1.1f, yc, sc, g, C2D_AlignCenter, text_z - 0.01f);
+        lyfont_draw(s, x, yc + 1.1f, sc, g, C2D_AlignCenter, text_z - 0.01f);
     }
     lyfont_draw(s, x, yc, sc, C(col), C2D_AlignCenter, text_z);
     return true;
@@ -2174,25 +2174,47 @@ static void draw_lyrics_top(void)
     } else if (synced) {
         const int idx = lyrics_index_at(pos);
         const float goal = (float)idx;
-        if (!S.ly_animated || S.saver || S.ly_anim_style != 0 || fabsf(goal - ly_pos) > 6.0f)
+        /* Keep the line carousel eased for every style. Previously non-Slide styles snapped
+         * directly to the new line, which looked jerky whenever an LRC timestamp changed. */
+        if (!S.ly_animated || S.saver || fabsf(goal - ly_pos) > 6.0f)
             ly_pos = goal;
         else
-            ly_pos += (goal - ly_pos) * 0.20f;
+            ly_pos += (goal - ly_pos) * 0.23f;
         const int c0 = (int)floorf(ly_pos + 0.5f);
         int elapsed_ms = idx >= 0 ? (int)pos - lyrics_time(idx) : 0;
         if (elapsed_ms < 0) elapsed_ms = 0;
+        /* Short, deterministic entrance envelope. Effects use only a few scalar
+         * operations and existing 2D primitives so they stay cheap on 3DS. */
+        float t = (float)elapsed_ms / 420.0f;
+        if (t > 1.0f) t = 1.0f;
+        const float inv = 1.0f - t;
+        const float ease = 1.0f - inv * inv * inv;
         const float phase = (float)elapsed_ms / 1000.0f;
         float active_alpha = 1.0f;
         float active_scale = 0.78f;
         float active_y = 0.0f;
+        float active_x = 0.0f;
         if (S.ly_animated && !S.saver && idx >= 0) {
-            if (S.ly_anim_style == 1) {                         /* Fade */
-                active_alpha = fminf(1.0f, 0.20f + (float)elapsed_ms / 300.0f);
-            } else if (S.ly_anim_style == 2) {                  /* Pulse */
-                active_scale += 0.035f * sinf(phase * 7.0f);
-            } else if (S.ly_anim_style == 3) {                  /* Bounce */
-                if (elapsed_ms < 420)
-                    active_y = -7.0f * sinf((float)elapsed_ms / 420.0f * 3.14159265f);
+            switch (S.ly_anim_style) {
+            case 0: /* Slide: sweep in from the right, then settle. */
+                active_x = 30.0f * inv;
+                active_y = 4.0f * inv;
+                active_scale = 0.78f + 0.035f * ease;
+                break;
+            case 1: /* Fade: emerge softly while growing to full size. */
+                active_alpha = 0.08f + 0.92f * ease;
+                active_scale = 0.66f + 0.12f * ease;
+                break;
+            case 2: /* Pulse: a pronounced arrival pop, followed by a soft beat. */
+                active_scale = 0.78f + 0.13f * sinf(ease * 3.14159265f)
+                             + 0.025f * sinf(phase * 7.0f);
+                break;
+            case 3: /* Bounce: overshoot upward and spring back into place. */
+                active_y = -22.0f * sinf(ease * 3.14159265f) * inv;
+                active_scale = 0.78f + 0.075f * sinf(ease * 3.14159265f);
+                break;
+            default:
+                break;
             }
         }
         for (int k = -3; k <= 3; k++) {
@@ -2207,12 +2229,37 @@ static void draw_lyrics_top(void)
                 const Rgb active_rgb = mix_rgb(th_bg, mix_rgb(th_acc, th_tx, 60), (int)(active_alpha * 255.0f));
                 const u32 active_col = Ca(active_rgb, active_alpha);
                 const float line_y = cy + active_y;
-                if (!ly_gothic_line(tx, 200, line_y, active_scale, active_rgb, 0.45f * active_alpha, 372.0f)) {
+                const float line_x = 200.0f + active_x;
+                /* Each style has its own signature accent, drawn with cheap solid
+                 * rectangles rather than extra text/glow passes. */
+                if (S.ly_animated && !S.saver) {
+                    if (S.ly_anim_style == 0) { /* Slide: trailing motion bar */
+                        const float w = 92.0f * ease;
+                        C2D_DrawRectSolid(line_x - w * 0.5f, line_y + 14.0f, 0.45f,
+                                          w, 2.4f, Ca(th_acc, 0.90f));
+                    } else if (S.ly_anim_style == 1) { /* Fade: gentle full-width wash */
+                        C2D_DrawRectSolid(24.0f, line_y - 16.0f, 0.44f, 352.0f, 32.0f,
+                                          Ca(th_acc, 0.13f * active_alpha));
+                    } else if (S.ly_anim_style == 2) { /* Pulse: paired breathing side bars */
+                        const float beat = 0.35f + 0.65f * (0.5f + 0.5f * sinf(phase * 7.0f));
+                        const float h = 8.0f + 8.0f * beat;
+                        C2D_DrawRectSolid(34.0f, line_y - h * 0.5f, 0.44f, 3.0f, h, Ca(th_acc, 0.85f));
+                        C2D_DrawRectSolid(363.0f, line_y - h * 0.5f, 0.44f, 3.0f, h, Ca(th_acc, 0.85f));
+                    } else if (S.ly_anim_style == 3) { /* Bounce: impact plate + settling underline */
+                        const float impact = 0.10f + 0.18f * sinf(ease * 3.14159265f);
+                        C2D_DrawRectSolid(28.0f, line_y - 16.0f, 0.44f, 344.0f, 32.0f,
+                                          Ca(th_acc, impact));
+                        const float w = 54.0f + 66.0f * ease;
+                        C2D_DrawRectSolid(200.0f - w * 0.5f, line_y + 14.0f, 0.45f,
+                                          w, 2.8f, Ca(th_acc, 0.90f));
+                    }
+                }
+                if (!ly_gothic_line(tx, line_x, line_y, active_scale, active_rgb, 0.34f * active_alpha, 372.0f)) {
                     const float sc = fit_scale(tx, 0.70f, 372.0f) * (active_scale / 0.78f);
                     if (S.ly_font == 0)
-                        draw_text_glow(tx, 200, line_y - 14.0f * sc, sc, C2D_AlignCenter, active_rgb, th_glow, 0.45f * active_alpha, active_alpha, 372);
+                        draw_text_glow(tx, line_x, line_y - 14.0f * sc, sc, C2D_AlignCenter, active_rgb, th_glow, 0.45f * active_alpha, active_alpha, 372);
                     else
-                        ly_draw_text(tx, 200, line_y - 14.0f * ly_font_scale(sc), sc, active_col, C2D_AlignCenter, 372);
+                        ly_draw_text(tx, line_x, line_y - 14.0f * ly_font_scale(sc), sc, active_col, C2D_AlignCenter, 372);
                 }
             } else {
                 const Rgb dim = mix_rgb(mix_rgb(th_tx, th_bg, 55), th_bg, (int)((1.0f - a) * 255.0f));
