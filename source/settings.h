@@ -39,7 +39,7 @@ typedef struct {
     bool ly_offline;                 /* lyrics: never use the network, cache only */
     bool ly_sync;                    /* lyrics: prefer synchronized (LRC) lyrics */
     bool ly_animated;                /* lyrics: animate line transitions and scrolling */
-    int  ly_anim_style;              /* lyrics animation: 0 slide, 1 fade, 2 pulse, 3 bounce */
+    int  ly_anim_style;              /* lyrics animation: 0 slide, 1 fade, 2 karaoke, 3 bounce */
     int  ly_font;                    /* lyrics text style: 0 = Gothic, 1 = Bold, 2 = Compact, 3 = System */
     int  kb_font;                    /* on-screen keyboard keys + text: 0 = Gothic, 1 = Bold, 2 = System, 3 = Compact */
     int  ui_ver;                     /* settings-file UI version (2 = Noise blue default theme) */
