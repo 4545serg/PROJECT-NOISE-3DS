@@ -914,11 +914,15 @@ static void sleep_timer_cancel(void)
 static void apt_lid_hook(APT_HookType hook, void *param)
 {
     (void)param;
-    if (hook == APTHOOK_ONSLEEP) {
-        lcd_off = false;                          /* the system handles the screens across sleep */
-        paused_for_sleep = audio_is_active() && !audio_is_paused();
-        if (paused_for_sleep) audio_pause();
-    } else if (hook == APTHOOK_ONWAKEUP) {
+    /* Sleep (lid / power) and suspend (HOME button) both take the DSP and the GPU away from the app: stop feeding
+     * the audio engine first, and pick up again when we are brought back. */
+    if (hook == APTHOOK_ONSLEEP || hook == APTHOOK_ONSUSPEND) {
+        lcd_off = false;                          /* the system handles the screens across sleep / suspend */
+        if (!paused_for_sleep) {
+            paused_for_sleep = audio_is_active() && !audio_is_paused();
+            if (paused_for_sleep) audio_pause();
+        }
+    } else if (hook == APTHOOK_ONWAKEUP || hook == APTHOOK_ONRESTORE) {
         if (paused_for_sleep) { audio_resume(); paused_for_sleep = false; }
     }
 }
