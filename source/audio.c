@@ -119,14 +119,22 @@ static void eq_process(s16 *d, int frames)
     }
 }
 
-/* ---- visualizer analysis: 12 Goertzel bands + a decimated waveform per decoded chunk ---- */
-#define VIS_N     768
-#define VIS_SLOTS 10
+/* ---- visualizer analysis: 12 Goertzel bands + a decimated waveform per decoded chunk ----
+ * The band analysis looks at the last VIS_N mono samples (about 35 ms, spanning the previous chunk too), long
+ * enough to tell the bass bands apart; each result is stamped with the frame at the CENTRE of its window and
+ * audio_get_vis() hands back the one closest to the exact playback position (buffer start + DSP sample
+ * position), so the bars move with what is heard, not with what was merely decoded.
+ * Levels are normalised per song: quiet recordings are lifted (never loud ones pushed past full scale), so the
+ * display uses its whole range whatever the mastering. */
+#define VIS_N     1536
+#define VIS_SLOTS 12
 typedef struct { volatile u32 start; volatile bool valid; float band[AUDIO_VIS_BANDS]; float wave[AUDIO_VIS_WAVE]; } VisSlot;
 static VisSlot         vis_ring[VIS_SLOTS];
 static int             vis_head;
 static u32             g_dec_frames;          /* frames decoded (and queued) since the track start / seek point */
-static float           vis_win[VIS_N], vis_x[VIS_N], vis_coef[AUDIO_VIS_BANDS];
+static float           vis_win[VIS_N], vis_x[VIS_N], vis_hist[VIS_N], vis_coef[AUDIO_VIS_BANDS];
+static int             vis_hpos, vis_hfill;   /* mono history ring */
+static float           vis_ref;               /* slow peak tracker of the band level, for per-song gain */
 static int             vis_hz;
 static bool            vis_win_ready;
 static const float     VIS_FREQ[AUDIO_VIS_BANDS] = { 60, 100, 160, 260, 420, 680, 1100, 1800, 3000, 5000, 8000, 12000 };
@@ -135,6 +143,8 @@ static void vis_reset(void)
 {
     for (int i = 0; i < VIS_SLOTS; i++) vis_ring[i].valid = false;
     vis_head = 0;
+    vis_hpos = vis_hfill = 0;
+    vis_ref = 0.55f;
 }
 
 static void vis_analyze(const s16 *d, int frames, u32 start)
@@ -149,13 +159,20 @@ static void vis_analyze(const s16 *d, int frames, u32 start)
         for (int b = 0; b < AUDIO_VIS_BANDS; b++)
             vis_coef[b] = (VIS_FREQ[b] < (float)vis_hz * 0.45f) ? 2.0f * cosf(6.2831853f * VIS_FREQ[b] / (float)vis_hz) : 0.0f;
     }
-    const int n = frames < VIS_N ? frames : VIS_N, base = frames - n;
-    for (int i = 0; i < n; i++) {
-        float m = ((float)d[2 * (base + i)] + (float)d[2 * (base + i) + 1]) * (0.5f / 32768.0f);
-        vis_x[i] = m * vis_win[(i * (VIS_N - 1)) / (n > 1 ? n - 1 : 1)];
+    for (int i = 0; i < frames; i++) {                                   /* append this chunk to the mono history */
+        vis_hist[vis_hpos] = ((float)d[2 * i] + (float)d[2 * i + 1]) * (0.5f / 32768.0f);
+        vis_hpos = (vis_hpos + 1) % VIS_N;
     }
+    vis_hfill += frames;
+    if (vis_hfill > VIS_N) vis_hfill = VIS_N;
+    const int n = vis_hfill;
+    if (n < 256) return;
+    for (int i = 0; i < n; i++)
+        vis_x[i] = vis_hist[(vis_hpos - n + i + VIS_N) % VIS_N] * vis_win[(i * (VIS_N - 1)) / (n > 1 ? n - 1 : 1)];
+
     VisSlot *sl = &vis_ring[vis_head];
     sl->valid = false;
+    float raw[AUDIO_VIS_BANDS], peak = 0.0f;
     for (int b = 0; b < AUDIO_VIS_BANDS; b++) {
         float c = vis_coef[b], s1 = 0.0f, s2 = 0.0f, lvl = 0.0f;
         if (c != 0.0f) {
@@ -167,16 +184,28 @@ static void vis_analyze(const s16 *d, int frames, u32 start)
             if (lvl < 0.0f) lvl = 0.0f;
             if (lvl > 1.0f) lvl = 1.0f;
         }
-        sl->band[b] = lvl;
+        raw[b] = lvl;
+        if (lvl > peak) peak = lvl;
+    }
+    /* per-song gain: the reference follows the loudest band quickly upward and decays over ~8 s, so a quiet song
+     * is lifted toward full scale while a loud one is left alone */
+    if (peak > vis_ref) vis_ref += (peak - vis_ref) * 0.5f; else vis_ref *= 0.997f;
+    float ref = vis_ref < 0.30f ? 0.30f : vis_ref;
+    float gain = 0.85f / ref;
+    if (gain < 1.0f) gain = 1.0f;
+    if (gain > 2.0f) gain = 2.0f;
+    for (int b = 0; b < AUDIO_VIS_BANDS; b++) {
+        float v = raw[b] * gain;
+        sl->band[b] = v > 1.0f ? 1.0f : v;
     }
     const int seg = frames / AUDIO_VIS_WAVE;
     for (int k = 0; k < AUDIO_VIS_WAVE; k++) {
         float acc = 0.0f;
         for (int i = 0; i < seg; i++) acc += (float)d[2 * (k * seg + i)] + (float)d[2 * (k * seg + i) + 1];
-        float v = acc / (float)(seg * 2) / 32768.0f * 2.4f;
+        float v = acc / (float)(seg * 2) / 32768.0f * 2.4f * gain;
         sl->wave[k] = v > 1.0f ? 1.0f : (v < -1.0f ? -1.0f : v);
     }
-    sl->start = start;
+    sl->start = start + (u32)frames - (u32)(n / 2);                      /* frame at the centre of the analysed window */
     sl->valid = true;
     vis_head = (vis_head + 1) % VIS_SLOTS;
 }
@@ -184,13 +213,17 @@ static void vis_analyze(const s16 *d, int frames, u32 start)
 bool audio_get_vis(float bands[AUDIO_VIS_BANDS], float wave[AUDIO_VIS_WAVE])
 {
     if (!g_active || g_want_pause) return false;
-    const u32 now = g_played;                 /* the buffer playing right now starts at this frame */
+    u32 now = g_played;                       /* the buffer playing right now starts at this frame ... */
+    const u32 sp = ndspChnGetSamplePos(0);    /* ... and the DSP is this far into it */
+    if (sp < 8192) now += sp;
     int best = -1;
+    u32 best_d = 0xFFFFFFFFu;
     for (int i = 0; i < VIS_SLOTS; i++) {
-        if (!vis_ring[i].valid || vis_ring[i].start > now) continue;
-        if (best < 0 || vis_ring[i].start > vis_ring[best].start) best = i;
+        if (!vis_ring[i].valid) continue;
+        const u32 c = vis_ring[i].start, dd = c > now ? c - now : now - c;
+        if (dd < best_d) { best_d = dd; best = i; }
     }
-    if (best < 0 || now - vis_ring[best].start > 6000) return false;
+    if (best < 0 || best_d > 6000) return false;
     memcpy(bands, vis_ring[best].band, sizeof(float) * AUDIO_VIS_BANDS);
     memcpy(wave, vis_ring[best].wave, sizeof(float) * AUDIO_VIS_WAVE);
     return true;

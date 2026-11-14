@@ -3,6 +3,12 @@
 - Pressing HOME (or sleeping) now pauses the music, parks the audio thread so it makes no DSP calls while the app is away, allows sleep, and gives back the screen-control service; coming back resumes the song if it was playing.
 - The screen-control service is only opened while the lid is closed during playback.
 
+## Visualizers follow the song
+- The analysis now looks at ~35 ms of audio (was ~17 ms), so the bass bands are told apart instead of moving as one.
+- Bars and scope are matched to the exact playback position (DSP sample position, nearest analysis window) instead of the start of the playing buffer.
+- Per-song gain: quiet recordings are lifted so every visualizer uses its full range; loud ones are left alone.
+- Smoothing retuned: fast attack so hits land on the beat, moderate release, near-instant scope trace. Also drives the Beat lyric style and the glow pulse.
+
 ## Defaults and setup
 - New defaults: Track info off, Album colors off, Glow color Violet (the Visualizer already defaults to the album Cover). Existing saved settings are kept.
 - The setup step now says there is much more to customize in Settings (SELECT).

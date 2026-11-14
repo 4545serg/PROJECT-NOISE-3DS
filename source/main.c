@@ -211,19 +211,19 @@ static void vis_update(void)
 {
     float b[AUDIO_VIS_BANDS], w[AUDIO_VIS_WAVE];
     const bool live = audio_ok && audio_get_vis(b, w);
-    /* Keep the analyser responsive, but deliberately tame the attack/release so normal
-     * volume changes do not turn into large visual spikes. This is intentionally cheap
-     * scalar smoothing for the Old 3DS; no extra FFT/shader work is introduced here. */
+    /* The analysis is already matched to the song (per-song gain in audio.c) and to the exact playback position,
+     * so smoothing only has to hide frame-to-frame jitter: a fast attack so beats land on the beat, a moderate
+     * release so bars fall away naturally. The waveform is nearly unsmoothed so the scope follows the audio. */
     for (int i = 0; i < AUDIO_VIS_BANDS; i++) {
-        const float t = live ? b[i] * 0.62f : 0.0f;
-        const float rate = t > vis_band[i] ? 0.22f : 0.075f;
+        const float t = live ? b[i] * 0.86f : 0.0f;
+        const float rate = t > vis_band[i] ? 0.62f : (live ? 0.16f : 0.10f);
         vis_band[i] += (t - vis_band[i]) * rate;
         vis_peak[i] -= 0.0065f;
         if (vis_peak[i] < vis_band[i]) vis_peak[i] = vis_band[i];
     }
     for (int k = 0; k < AUDIO_VIS_WAVE; k++) {
-        const float target = live ? w[k] * 0.58f : 0.0f;
-        vis_wave[k] += (target - vis_wave[k]) * 0.18f;
+        const float target = live ? w[k] * 0.80f : 0.0f;
+        vis_wave[k] += (target - vis_wave[k]) * 0.55f;
     }
     vis_bass += (((vis_band[0] + vis_band[1] + vis_band[2]) / 3.0f) - vis_bass) * 0.12f;
 }
