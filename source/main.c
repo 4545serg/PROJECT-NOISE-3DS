@@ -2193,12 +2193,15 @@ static int ly_utf8_count(const char *s)
 #define LY_MAXROWS  3
 #define LY_CACHE    24
 #define LY_EDGE_W   360.0f                                        /* widest a row may be (screen is 400 wide) */
-#define LY_BEAT_MAX 1.14f                                         /* biggest the Beat effect can grow a line */
+#define LY_BEAT_MAX 1.06f                                         /* biggest the Beat effect can grow a line */
+#define LY_REF_G    0.70f                                         /* reference scales the still lines are wrapped at: */
+#define LY_REF_S    0.56f                                         /*   Gothic / system font (see ly_draw_rows) */
 
 typedef struct {
     u32   key;
     int   len, nw, rows, maxrows, font;
-    float base, maxw, floor1, scale, sp1;
+    float base, maxw, floor1, scale, fit, sp1;
+    bool  goth;                                                   /* whole line can be drawn in the Gothic typeface */
     int   brk[LY_MAXROWS + 1];                                    /* first word of each row; brk[rows] = nw */
     short ws[LY_MAXWORDS], we[LY_MAXWORDS];                       /* byte range of each word inside the line */
     float w1[LY_MAXWORDS];                                        /* word widths at scale 1 */
@@ -2239,7 +2242,8 @@ static const LyLay *ly_layout(const char *line, float base, float maxw, int maxr
     LyLay *L = &ly_cache[ly_cache_next];
     ly_cache_next = (ly_cache_next + 1) % LY_CACHE;
     L->key = k; L->len = len; L->base = base; L->maxw = maxw; L->maxrows = maxrows; L->floor1 = floor1;
-    L->font = S.ly_font; L->nw = 0; L->rows = 0; L->scale = base;
+    L->font = S.ly_font; L->nw = 0; L->rows = 0; L->scale = base; L->fit = 1000.0f;
+    L->goth = ly_is_gothic(line);
     if (maxrows < 1) maxrows = 1;
     if (maxrows > LY_MAXROWS) maxrows = LY_MAXROWS;
 
@@ -2298,6 +2302,7 @@ static const LyLay *ly_layout(const char *line, float base, float maxw, int maxr
         if (mw > 0.0f && mw * base > maxw) s = maxw / mw;
         const float need = (R == 1) ? base * floor1 : (R == 2 ? base * 0.60f : 0.0f);
         if (s >= need || R == maxrows) {
+            L->fit = (mw > 0.0f) ? maxw / mw : 1000.0f;           /* biggest scale at which the widest row fits */
             if (s < 0.22f) s = 0.22f;
             L->rows = rows; L->scale = s; L->nw = nw;
             for (int i = 0; i <= rows; i++) L->brk[i] = brk[i];
@@ -2313,10 +2318,10 @@ static const LyLay *ly_active_layout(int style, const char *line, float base_sc)
 }
 
 /* one word at (x = left edge, y = top for the system font); alpha / scale already decided by the effect */
-static void ly_put_word(const char *w, float x, float y, float wid, float sc, Rgb col, float alpha)
+static void ly_put_word(const char *w, bool goth, float x, float y, float wid, float sc, Rgb col, float alpha)
 {
     if (alpha <= 0.01f) return;
-    if (S.ly_font == 0 && lyfont_ok() && lyfont_can(w))
+    if (goth || ly_is_gothic(w))
         lyfont_draw(w, x + wid * 0.5f, y + 14.0f * sc, sc, Ca(col, alpha), C2D_AlignCenter, text_z);
     else
         ly_draw_text(w, x, y, sc, Ca(col, alpha), C2D_AlignLeft, wid + 4.0f);
@@ -2327,16 +2332,21 @@ static void ly_put_word(const char *w, float x, float y, float wid, float sc, Rg
  * cy = vertical centre of the block. */
 static void ly_draw_rows(const char *tx, float cx, float cy, float base, float cap, Rgb col, float alpha, float maxw)
 {
-    const LyLay *L = ly_layout(tx, base, maxw, 2, 0.80f);
+    /* A neighbour's size glides while the carousel moves. The wrap decision is therefore made once, at a fixed
+     * reference scale, so the cached layout is reused on every frame of the glide; the rows are then drawn at
+     * min(base, the scale at which the widest row fits). */
+    const LyLay *L = ly_layout(tx, LY_REF_G, maxw, 2, 0.80f);
+    if (!L->goth) L = ly_layout(tx, LY_REF_S, maxw, 2, 0.80f);
     if (L->rows <= 0) return;
-    float sc = L->scale;
+    float sc = base < L->fit ? base : L->fit;
+    if (sc < 0.22f) sc = 0.22f;
     if (L->rows > 1 && sc > base * cap) sc = base * cap;
     const float pitch = 30.0f * sc;
     for (int r = 0; r < L->rows; r++) {
         char row[256];
         ly_copy(row, sizeof row, tx, L->ws[L->brk[r]], L->we[L->brk[r + 1] - 1]);
         const float yc = cy + ((float)r - (float)(L->rows - 1) * 0.5f) * pitch;
-        if (ly_is_gothic(row)) lyfont_draw(row, cx, yc, sc, Ca(col, alpha), C2D_AlignCenter, text_z);
+        if (L->goth || ly_is_gothic(row)) lyfont_draw(row, cx, yc, sc, Ca(col, alpha), C2D_AlignCenter, text_z);
         else ly_draw_text(row, cx, yc - 14.0f * ly_font_scale(sc), sc, Ca(col, alpha), C2D_AlignCenter, maxw + 12.0f);
     }
 }
@@ -2358,13 +2368,13 @@ static float ly_beat_pulse(void)
     const float lo = ly_beat_lo();
     const float flux = lo - avg;
     avg += (lo - avg) * (1.0f - expf(-dt * 2.2f));
-    if (flux > 0.07f && lo > 0.20f && now - last_hit > 170) {
-        float hit = 0.55f + flux * 2.5f;
+    if (flux > 0.10f && lo > 0.25f && now - last_hit > 260) {
+        float hit = 0.45f + flux * 2.0f;
         if (hit > 1.0f) hit = 1.0f;
         if (hit > pulse) pulse = hit;
         last_hit = now;
     }
-    pulse *= expf(-dt * 6.0f);
+    pulse *= expf(-dt * 4.5f);                                       /* a slower settle reads as a gentle swell, not a flicker */
     return pulse;
 }
 
@@ -2385,7 +2395,7 @@ static void ly_draw_active(int style, const char *line, float cx, float cy, floa
     float scale = L->scale, alpha = 1.0f, tint = 0.0f;
 
     if (style == 0) { alpha = 0.10f + 0.90f * ly_smooth(el / 420.0f); tint = 1.0f - ly_smooth(el / 700.0f); }
-    else if (style == 3) scale *= 1.0f + 0.11f * pulse + 0.02f * ly_clamp01(ly_beat_lo());
+    else if (style == 3) scale *= 1.0f + 0.035f * pulse + 0.010f * ly_clamp01(ly_beat_lo());
 
     const float pitch = 30.0f * scale, sp = L->sp1 * scale;
     int total_chars = 0, vis = 0, used = 0;
@@ -2412,7 +2422,7 @@ static void ly_draw_active(int style, const char *line, float cx, float cy, floa
             if (take <= 0) continue;
             ly_utf8_prefix(rt, take > cnt ? cnt : take, part, sizeof part);
             const float pw = ly_word_width(part, scale);
-            if (ly_is_gothic(part)) lyfont_draw(part, x0 + pw * 0.5f, yc, scale, C(base), C2D_AlignCenter, text_z);
+            if (L->goth || ly_is_gothic(part)) lyfont_draw(part, x0 + pw * 0.5f, yc, scale, C(base), C2D_AlignCenter, text_z);
             else ly_draw_text(part, x0, yc - 14.0f * ly_font_scale(scale), scale, C(base), C2D_AlignLeft, rw + 12.0f);
             if (vis < total_chars && take <= cnt && !S.saver)      /* soft cursor at the reveal edge */
                 rrect(x0 + pw + 2.0f, yc - 11.0f, 2.0f, 20.0f, 1.0f, 0.12f, Ca(accent, 0.55f + 0.45f * sinf(el * 0.02f)));
@@ -2429,7 +2439,7 @@ static void ly_draw_active(int style, const char *line, float cx, float cy, floa
                 const float calm = 1.0f - ly_smooth(el / 2200.0f);  /* the wave fades away instead of running forever */
                 wy = sinf(el * 0.0068f - (float)i * 0.75f) * 3.2f * calm;
             } else if (style == 3) {
-                col = mix_rgb(base, accent, (int)(ly_clamp01(pulse) * 110.0f));
+                col = mix_rgb(base, accent, (int)(ly_clamp01(pulse) * 45.0f));
             } else if (style == 4) {
                 const float t = ly_clamp01((el - ((float)i / (float)nw) * 380.0f) / 300.0f);
                 a = ly_ease_out(t);
@@ -2437,7 +2447,7 @@ static void ly_draw_active(int style, const char *line, float cx, float cy, floa
             }
             char w[96];
             ly_copy(w, sizeof w, line, L->ws[i], L->we[i]);
-            ly_put_word(w, x, yc - 14.0f * ly_font_scale(scale) + wy, wid, scale, col, a);
+            ly_put_word(w, L->goth, x, yc - 14.0f * ly_font_scale(scale) + wy, wid, scale, col, a);
             x += wid + sp;
         }
     }
@@ -2540,9 +2550,9 @@ static void draw_lyrics_top(void)
                 ly_draw_active(style, tx, 200.0f, cy, 0.70f, elapsed_ms, mix_rgb(th_acc, th_tx, 60), th_acc, pulse);
             } else {
                 const float a = ly_clamp01(1.0f - ad * 0.30f) * (0.70f + 0.30f * (1.0f - focus));
-                if (a < 0.06f) continue;
+                if (a < 0.12f) continue;                                  /* the 3rd line out is barely visible: not worth ~100 sprites */
                 const float sc = 0.46f + 0.10f * focus;               /* the neighbour swells slightly as it becomes current */
-                ly_draw_rows(tx, 200.0f, cy, ly_is_gothic(tx) ? sc + 0.14f : sc, 0.62f, mix_rgb(th_tx, th_bg, 55), a, LY_EDGE_W);
+                ly_draw_rows(tx, 200.0f, cy, ly_layout(tx, LY_REF_G, LY_EDGE_W, 2, 0.80f)->goth ? sc + 0.14f : sc, 0.62f, mix_rgb(th_tx, th_bg, 55), a, LY_EDGE_W);
             }
         }
     } else {
@@ -2562,7 +2572,7 @@ static void draw_lyrics_top(void)
             if (a <= 0.02f) continue;
             if (a > 1.0f) a = 1.0f;
             const char *tx = lyrics_text(i);
-            const bool g = ly_is_gothic(tx);
+            const bool g = ly_layout(tx, LY_REF_G, LY_EDGE_W, 2, 0.80f)->goth;
             ly_draw_rows(tx, 200.0f, y + (g ? 10.0f : 7.0f), g ? 0.60f : 0.50f, 0.62f, th_tx, a, LY_EDGE_W);
         }
         if (n > 7) {                                                   /* scroll position */

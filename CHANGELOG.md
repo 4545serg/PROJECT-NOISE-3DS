@@ -1,3 +1,9 @@
+## Lyrics: smoother scrolling, gentler Beat
+
+- Fixed the lag on lyric changes: the neighbouring lines change size while they glide into place, and that made every one of them get re-measured (and the layout cache thrashed) on every frame of the glide. Wrapping is now decided once per line at a fixed reference size and reused; the Gothic-or-system-font check is cached instead of decoding the text again for every row and word each frame. A scroll now measures one new line instead of everything on screen, every frame.
+- The 3rd line out from the current one (almost invisible) is no longer drawn.
+- Beat toned down: the pop is about a third of its previous size (3.5% instead of 11%), the colour flash is smaller, hits need to be stronger and further apart, and the line settles back more slowly so it reads as a gentle swell rather than a flicker.
+
 ## Lyrics: fewer effects, no cut-off lines, working Beat
 
 - Removed the Karaoke, Rise and Bloom lyric animations. Remaining styles: Fade, Ripple, Typewriter, Beat, Cascade. Old saved choices are migrated automatically (removed styles become Fade); the setting is now stored as `ly_style`.
