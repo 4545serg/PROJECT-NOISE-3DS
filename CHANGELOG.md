@@ -3,6 +3,10 @@
 - Pressing HOME (or sleeping) now pauses the music, parks the audio thread so it makes no DSP calls while the app is away, allows sleep, and gives back the screen-control service; coming back resumes the song if it was playing.
 - The screen-control service is only opened while the lid is closed during playback.
 
+## Defaults and setup
+- New defaults: Track info off, Album colors off, Glow color Violet (the Visualizer already defaults to the album Cover). Existing saved settings are kept.
+- The setup step now says there is much more to customize in Settings (SELECT).
+
 ## Neon Crown boot screen, icon and banner
 - New boot screen from the Neon Crown artwork: full-art top screen with a progress bar and the current task, and a bottom screen with a live animated equaliser. When loading finishes it shows "Press A to continue" (only the A button continues).
 - HOME Menu icon (crown) and banner (logo) now come from the same artwork via `tools/make_icons.py`.

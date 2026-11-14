@@ -95,12 +95,12 @@ void settings_defaults(Settings *s)
     s->fade_speed = 1;
     s->display_mode = 0;
     s->wallpaper = 0;
-    s->glow_color = 0;
-    s->dyn_color = true;
+    s->glow_color = 5;                 /* Violet */
+    s->dyn_color = false;
     s->batt_style = 0;
     s->oled = false;
     s->saver = false;
-    s->show_info = true;
+    s->show_info = false;
     s->resume = true;
     s->lid_play = false;
     s->ly_search = true;

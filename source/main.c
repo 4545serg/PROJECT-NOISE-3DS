@@ -3166,6 +3166,8 @@ static void draw_wizard_bottom(void)
 
     if (WZ_CARD[wz_page] >= 0) {
         draw_card(WZ_CARD[wz_page]);
+        /* these four are only the basics: point at the rest */
+        draw_text("There's much more to customize in Settings (SELECT)", 160, 177, 0.38f, cAcc, C2D_AlignCenter, 300);
     } else if (wz_page == WZ_WELCOME) {                       /* quick checks */
         rrect(6, 62, 308, 96, 10, 0.26f, cCard);
         draw_text("Sound", 18, 70, 0.5f, cText, C2D_AlignLeft, 100);
