@@ -38,7 +38,7 @@ typedef struct {
     bool ly_download;                /* lyrics: keep downloaded lyrics in the SD cache */
     bool ly_offline;                 /* lyrics: never use the network, cache only */
     bool ly_animated;                /* lyrics: animate line transitions and scrolling */
-    int  ly_anim_style;              /* lyrics animation style: 0..7 */
+    int  ly_anim_style;              /* lyrics animation style: 0 Fade, 1 Ripple, 2 Typewriter, 3 Beat, 4 Cascade */
     int  ly_font;                    /* lyrics text style: 0 = Gothic, 1 = Bold, 2 = Compact, 3 = System */
     int  kb_font;                    /* on-screen keyboard keys + text: 0 = Gothic, 1 = Bold, 2 = System, 3 = Compact */
     int  ui_ver;                     /* settings-file UI version (2 = Noise blue default theme) */

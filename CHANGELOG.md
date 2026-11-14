@@ -1,3 +1,10 @@
+## Lyrics: fewer effects, no cut-off lines, working Beat
+
+- Removed the Karaoke, Rise and Bloom lyric animations. Remaining styles: Fade, Ripple, Typewriter, Beat, Cascade. Old saved choices are migrated automatically (removed styles become Fade); the setting is now stored as `ly_style`.
+- Long lyric lines are no longer cut with "..." or pushed past the screen edges. A line that does not fit is shrunk a little, then wrapped onto 2-3 balanced rows (active line, neighbouring lines and plain-text lyrics alike), and the lines around a wrapped line move apart so nothing overlaps. Rows stay inside 20 px margins.
+- Beat rewritten: it now pops on each bass hit (the low bands compared with their own slow average) and settles back, instead of reading a near-flat waveform average that barely moved. The pop can no longer push a long line off the edge.
+- Word widths are measured once per line and cached, so wrapped lyrics cost less per frame than before.
+
 ## HOME button / sleep safety
 
 - Pressing HOME (or sleeping) now pauses the music, parks the audio thread so it makes no DSP calls while the app is away, allows sleep, and gives back the screen-control service; coming back resumes the song if it was playing.

@@ -198,7 +198,11 @@ void settings_load(Settings *s)
             s->ly_offline = atoi(value) != 0;
         else if (!strcmp(key, "ly_animated"))
             s->ly_animated = atoi(value) != 0;
-        else if (!strcmp(key, "ly_anim_style"))
+        else if (!strcmp(key, "ly_anim_style")) {      /* old numbering (8 styles): Karaoke / Rise / Bloom were removed */
+            static const signed char MAP[8] = { 0, 0, 0, 1, 2, 0, 3, 4 };
+            const int old = atoi(value);
+            s->ly_anim_style = (old >= 0 && old < 8) ? MAP[old] : 0;
+        } else if (!strcmp(key, "ly_style"))
             s->ly_anim_style = atoi(value);
         else if (!strcmp(key, "ly_font"))
             s->ly_font = atoi(value);
@@ -228,7 +232,7 @@ void settings_load(Settings *s)
     if (s->display_mode < 0 || s->display_mode > 3) s->display_mode = 0;
     if (s->wallpaper < 0 || s->wallpaper > 4) s->wallpaper = 0;
     if (s->ly_font < 0 || s->ly_font > 3) s->ly_font = 0;
-    if (s->ly_anim_style < 0 || s->ly_anim_style > 7) s->ly_anim_style = 0;
+    if (s->ly_anim_style < 0 || s->ly_anim_style > 4) s->ly_anim_style = 0;
     if (s->kb_font < 0 || s->kb_font > 3) s->kb_font = 0;
     if (s->glow_color < 0 || s->glow_color >= GLOWCOL_COUNT) s->glow_color = 0;
     if (s->batt_style < 0 || s->batt_style > 1) s->batt_style = 0;
@@ -290,7 +294,7 @@ bool settings_save(const Settings *s)
     fprintf(f, "ly_download=%d\n", s->ly_download ? 1 : 0);
     fprintf(f, "ly_offline=%d\n", s->ly_offline ? 1 : 0);
     fprintf(f, "ly_animated=%d\n", s->ly_animated ? 1 : 0);
-    fprintf(f, "ly_anim_style=%d\n", s->ly_anim_style);
+    fprintf(f, "ly_style=%d\n", s->ly_anim_style);
     fprintf(f, "ly_font=%d\n", s->ly_font);
     fprintf(f, "kb_font=%d\n", s->kb_font);
     fprintf(f, "ui_ver=%d\n", s->ui_ver);

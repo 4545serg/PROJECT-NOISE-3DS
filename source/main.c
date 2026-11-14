@@ -1159,7 +1159,7 @@ static void set_adjust(int dir)
     } else if (set_row == ROW_LY_ANIM) {
         S.ly_animated = !S.ly_animated;
     } else if (set_row == ROW_LY_STYLE) {
-        S.ly_anim_style = (S.ly_anim_style + dir + 8) % 8;
+        S.ly_anim_style = (S.ly_anim_style + dir + 5) % 5;
     } else if (set_row == ROW_LY_FONT) {
         S.ly_font = (S.ly_font + dir + 4) % 4;
     } else if (set_row == ROW_KB_FONT) {
@@ -2104,18 +2104,6 @@ static void draw_top(void)
 /* ====================================================================== lyrics screen
  * Top screen: current line highlighted in the middle, upcoming lines below (synced), or a scrollable text
  * (plain). Bottom screen intentionally remains the normal browser/player UI. */
-static float fit_scale(const char *s, float sc, float maxw)       /* shrink a line to fit the screen width */
-{
-    char tmp[300];
-    snprintf(tmp, sizeof tmp, "%s", s);
-    C2D_Text t;
-    C2D_TextParse(&t, tbuf, tmp);
-    float w = 0, h = 0;
-    C2D_TextGetDimensions(&t, sc, sc, &w, &h);
-    if (w > maxw && w > 0.0f) { sc *= maxw / w; if (sc < 0.32f) sc = 0.32f; }
-    return sc;
-}
-
 static float ly_font_scale(float sc)
 {
     if (S.ly_font == 2) return sc * 0.88f;
@@ -2197,6 +2185,133 @@ static int ly_utf8_count(const char *s)
     return n;
 }
 
+/* ---------------------------------------------------------------- line layout (wrapping)
+ * Long lyric lines are never cut with "...": a line that does not fit is first shrunk a little, then wrapped onto
+ * 2 (or at most 3) balanced rows, and only shrunk further if it still does not fit. Word widths are measured once
+ * at scale 1 and cached (the width of a word is linear in the scale), so the per-frame cost is plain arithmetic. */
+#define LY_MAXWORDS 64
+#define LY_MAXROWS  3
+#define LY_CACHE    24
+#define LY_EDGE_W   360.0f                                        /* widest a row may be (screen is 400 wide) */
+#define LY_BEAT_MAX 1.14f                                         /* biggest the Beat effect can grow a line */
+
+typedef struct {
+    u32   key;
+    int   len, nw, rows, maxrows, font;
+    float base, maxw, floor1, scale, sp1;
+    int   brk[LY_MAXROWS + 1];                                    /* first word of each row; brk[rows] = nw */
+    short ws[LY_MAXWORDS], we[LY_MAXWORDS];                       /* byte range of each word inside the line */
+    float w1[LY_MAXWORDS];                                        /* word widths at scale 1 */
+} LyLay;
+static LyLay ly_cache[LY_CACHE];
+static int   ly_cache_next;
+
+static void ly_copy(char *dst, size_t cap, const char *src, int a, int b)   /* bytes [a,b) of src, whole characters only */
+{
+    size_t n = b > a ? (size_t)(b - a) : 0;
+    if (n > cap - 1) {
+        n = cap - 1;
+        while (n && ((unsigned char)src[a + (int)n] & 0xC0) == 0x80) n--;
+    }
+    memcpy(dst, src + a, n);
+    dst[n] = 0;
+}
+
+static bool ly_is_gothic(const char *s) { return S.ly_font == 0 && lyfont_ok() && lyfont_can(s); }
+
+/* base = scale a one-row line is drawn at; maxw = widest allowed row; floor1 = how far (fraction of base) a single
+ * row may shrink before wrapping is preferred. The returned layout stays valid until 24 other layouts are made. */
+static const LyLay *ly_layout(const char *line, float base, float maxw, int maxrows, float floor1)
+{
+    const int len = (int)strlen(line);
+    u32 k = 2166136261u;
+    for (const unsigned char *q = (const unsigned char *)line; *q; q++) { k ^= *q; k *= 16777619u; }
+    k ^= (u32)(base * 1000.0f) * 2654435761u;
+    k ^= (u32)maxw * 40503u;
+    k ^= ((u32)maxrows << 24) ^ ((u32)S.ly_font << 28);
+    for (int i = 0; i < LY_CACHE; i++) {
+        const LyLay *e = &ly_cache[i];
+        if (e->nw > 0 && e->key == k && e->len == len && e->base == base && e->maxw == maxw &&
+            e->maxrows == maxrows && e->floor1 == floor1 && e->font == S.ly_font)
+            return e;
+    }
+
+    LyLay *L = &ly_cache[ly_cache_next];
+    ly_cache_next = (ly_cache_next + 1) % LY_CACHE;
+    L->key = k; L->len = len; L->base = base; L->maxw = maxw; L->maxrows = maxrows; L->floor1 = floor1;
+    L->font = S.ly_font; L->nw = 0; L->rows = 0; L->scale = base;
+    if (maxrows < 1) maxrows = 1;
+    if (maxrows > LY_MAXROWS) maxrows = LY_MAXROWS;
+
+    int nw = 0;
+    const char *p = line;
+    while (*p && nw < LY_MAXWORDS) {
+        while (*p && isspace((unsigned char)*p)) p++;
+        if (!*p) break;
+        const char *q = p;
+        if (nw == LY_MAXWORDS - 1) {                              /* last slot takes whatever is left */
+            q = p + strlen(p);
+            while (q > p && isspace((unsigned char)q[-1])) q--;
+        } else {
+            while (*q && !isspace((unsigned char)*q)) q++;
+        }
+        char buf[96];
+        L->ws[nw] = (short)(p - line);
+        L->we[nw] = (short)(q - line);
+        ly_copy(buf, sizeof buf, line, L->ws[nw], L->we[nw]);
+        L->w1[nw] = ly_word_width(buf, 1.0f);
+        nw++;
+        p = q;
+    }
+    if (nw == 0) return L;                                        /* blank line: nothing to draw, nothing cached */
+    L->sp1 = ly_word_width(" ", 1.0f);
+
+    float total = L->sp1 * (float)(nw - 1);
+    for (int i = 0; i < nw; i++) total += L->w1[i];
+    const float avg = total / (float)nw;
+
+    for (int R = 1; R <= maxrows; R++) {
+        int brk[LY_MAXROWS + 1], rows = 1;
+        float mw = total;
+        brk[0] = 0; brk[1] = nw;
+        if (R > 1) {                                              /* balanced greedy fill; widen the limit until it fits in R rows */
+            float limit = total / (float)R + avg * 0.5f;
+            for (int t = 0; t < 24; t++) {
+                bool ok = true;
+                float cur = 0.0f;
+                mw = 0.0f; rows = 1; brk[0] = 0;
+                for (int i = 0; i < nw; i++) {
+                    if (i == brk[rows - 1]) cur = L->w1[i];
+                    else if (cur + L->sp1 + L->w1[i] <= limit) cur += L->sp1 + L->w1[i];
+                    else {
+                        if (cur > mw) mw = cur;
+                        if (rows >= R) { ok = false; break; }
+                        brk[rows++] = i;
+                        cur = L->w1[i];
+                    }
+                }
+                if (ok) { if (cur > mw) mw = cur; brk[rows] = nw; break; }
+                limit *= 1.08f;
+            }
+        }
+        float s = base;
+        if (mw > 0.0f && mw * base > maxw) s = maxw / mw;
+        const float need = (R == 1) ? base * floor1 : (R == 2 ? base * 0.60f : 0.0f);
+        if (s >= need || R == maxrows) {
+            if (s < 0.22f) s = 0.22f;
+            L->rows = rows; L->scale = s; L->nw = nw;
+            for (int i = 0; i <= rows; i++) L->brk[i] = brk[i];
+            break;
+        }
+    }
+    return L;
+}
+
+static const LyLay *ly_active_layout(int style, const char *line, float base_sc)
+{
+    return ly_layout(line, base_sc, style == 3 ? LY_EDGE_W / LY_BEAT_MAX : LY_EDGE_W, LY_MAXROWS, 0.86f);
+}
+
 /* one word at (x = left edge, y = top for the system font); alpha / scale already decided by the effect */
 static void ly_put_word(const char *w, float x, float y, float wid, float sc, Rgb col, float alpha)
 {
@@ -2207,99 +2322,124 @@ static void ly_put_word(const char *w, float x, float y, float wid, float sc, Rg
         ly_draw_text(w, x, y, sc, Ca(col, alpha), C2D_AlignLeft, wid + 4.0f);
 }
 
-/* Draws the ACTIVE line with the selected effect. y = top of the text (system-font convention).
- *   0 Fade      the line dissolves in while the colour warms from dim to bright
- *   1 Karaoke   a soft highlight sweeps word by word; sung words settle to full brightness
- *   2 Rise      the line lifts up into place with a gentle overshoot
- *   3 Ripple    a wave runs through the words, then calms to a still line
- *   4 Typewriter  letters appear over the first part of the line, with a fading edge
- *   5 Bloom     the line grows from slightly small to full size with a soft overshoot
- *   6 Beat      the line breathes with the real audio level
- *   7 Cascade   words drop in one after another */
-static void ly_draw_active(int style, const char *line, float cx, float y, float sc, int elapsed_ms, float progress,
-                           Rgb base, Rgb accent, float energy)
+/* A still line (neighbours in the carousel, plain-text lyrics): shrunk a little, otherwise wrapped onto 2 rows.
+ * cap = fraction of base the rows are limited to once wrapped, so two rows fit the slot the line owns.
+ * cy = vertical centre of the block. */
+static void ly_draw_rows(const char *tx, float cx, float cy, float base, float cap, Rgb col, float alpha, float maxw)
+{
+    const LyLay *L = ly_layout(tx, base, maxw, 2, 0.80f);
+    if (L->rows <= 0) return;
+    float sc = L->scale;
+    if (L->rows > 1 && sc > base * cap) sc = base * cap;
+    const float pitch = 30.0f * sc;
+    for (int r = 0; r < L->rows; r++) {
+        char row[256];
+        ly_copy(row, sizeof row, tx, L->ws[L->brk[r]], L->we[L->brk[r + 1] - 1]);
+        const float yc = cy + ((float)r - (float)(L->rows - 1) * 0.5f) * pitch;
+        if (ly_is_gothic(row)) lyfont_draw(row, cx, yc, sc, Ca(col, alpha), C2D_AlignCenter, text_z);
+        else ly_draw_text(row, cx, yc - 14.0f * ly_font_scale(sc), sc, Ca(col, alpha), C2D_AlignCenter, maxw + 12.0f);
+    }
+}
+
+/* Beat effect: a pulse that jumps on every low-end hit (kick / bass note) and falls away again. The hit is found by
+ * comparing the current bass level with its own slow average, so it follows the song instead of a fixed threshold.
+ * Time based (same feel at any frame rate); reads the per-frame analysis that vis_update() already keeps. */
+static float ly_beat_lo(void) { return (vis_band[0] + vis_band[1] + vis_band[2]) * (1.0f / 3.0f); }
+
+static float ly_beat_pulse(void)
+{
+    static u64 prev = 0, last_hit = 0;
+    static float avg = 0.0f, pulse = 0.0f;
+    const u64 now = osGetTime();
+    float dt = prev ? (float)(now - prev) * 0.001f : 0.016f;
+    prev = now;
+    if (dt > 0.1f) dt = 0.1f;
+    if (dt < 0.001f) dt = 0.001f;
+    const float lo = ly_beat_lo();
+    const float flux = lo - avg;
+    avg += (lo - avg) * (1.0f - expf(-dt * 2.2f));
+    if (flux > 0.07f && lo > 0.20f && now - last_hit > 170) {
+        float hit = 0.55f + flux * 2.5f;
+        if (hit > 1.0f) hit = 1.0f;
+        if (hit > pulse) pulse = hit;
+        last_hit = now;
+    }
+    pulse *= expf(-dt * 6.0f);
+    return pulse;
+}
+
+/* Draws the ACTIVE line with the selected effect (style -1 = no effect). cy = vertical centre of the line / block.
+ *   0 Fade        the line dissolves in while the colour warms from dim to bright
+ *   1 Ripple      a wave runs through the words, then calms to a still line
+ *   2 Typewriter  letters appear over the first part of the line, with a fading edge
+ *   3 Beat        the line pops on every bass hit and settles back
+ *   4 Cascade     words drop in one after another
+ * A line too long for one row is wrapped onto 2-3 rows (centred on cy) instead of being cut. */
+static void ly_draw_active(int style, const char *line, float cx, float cy, float base_sc, int elapsed_ms,
+                           Rgb base, Rgb accent, float pulse)
 {
     const float el = (float)elapsed_ms;
-    const float enter = ly_clamp01(el / 380.0f);
-    char words[64][80];
-    float widths[64];
-    int count = 0;
+    const LyLay *L = ly_active_layout(style, line, base_sc);
+    if (L->nw <= 0 || L->rows <= 0) return;
+    const int nw = L->nw, rows = L->rows;
+    float scale = L->scale, alpha = 1.0f, tint = 0.0f;
 
-    if (style == 4) {                                              /* Typewriter works on characters, not words */
-        char part[320];
-        const int total = ly_utf8_count(line);
-        const float reveal = ly_smooth(ly_clamp01(el / (float)(total < 16 ? 500 : 900 + total * 6)));
-        int vis = (int)((float)total * reveal + 0.5f);
-        if (vis < 1) vis = 1;
-        if (vis > total) vis = total;
-        ly_utf8_prefix(line, vis, part, sizeof part);
-        const float w_full = ly_word_width(line, sc);
-        if (S.ly_font == 0 && lyfont_ok() && lyfont_can(line)) {
-            lyfont_draw(part, cx - w_full * 0.5f + ly_word_width(part, sc) * 0.5f, y + 14.0f * sc, sc, C(base), C2D_AlignCenter, text_z);
-        } else {
-            ly_draw_text(part, cx - w_full * 0.5f, y, sc, C(base), C2D_AlignLeft, 372.0f);
-        }
-        if (vis < total && !S.saver) {                             /* soft cursor at the reveal edge */
-            const float ex = cx - w_full * 0.5f + ly_word_width(part, sc) + 2.0f;
-            rrect(ex, y + 3.0f, 2.0f, 20.0f, 1.0f, 0.12f, Ca(accent, 0.55f + 0.45f * sinf(el * 0.02f)));
-        }
-        return;
-    }
-
-    const char *p = line;
-    while (*p && count < 64) {
-        while (*p && isspace((unsigned char)*p)) p++;
-        if (!*p) break;
-        size_t len = 0;
-        while (p[len] && !isspace((unsigned char)p[len]) && len < sizeof words[0] - 1) len++;
-        memcpy(words[count], p, len);
-        words[count][len] = 0;
-        count++;
-        p += len;
-    }
-    if (count <= 0) return;
-
-    /* whole-line transforms */
-    float scale = sc, dy = 0.0f, alpha = 1.0f, tint = 0.0f;
     if (style == 0) { alpha = 0.10f + 0.90f * ly_smooth(el / 420.0f); tint = 1.0f - ly_smooth(el / 700.0f); }
-    else if (style == 2) { dy = 16.0f * (1.0f - ly_ease_back(el / 460.0f)); alpha = ly_ease_out(el / 300.0f); }
-    else if (style == 5) { scale = sc * (0.80f + 0.20f * ly_ease_back(el / 480.0f)); alpha = ly_ease_out(el / 260.0f); }
-    else if (style == 6) { scale = sc * (1.0f + ly_clamp01(energy * 0.9f) * 0.10f); }
+    else if (style == 3) scale *= 1.0f + 0.11f * pulse + 0.02f * ly_clamp01(ly_beat_lo());
 
-    float space;
-    for (int i = 0; i < count; i++) widths[i] = ly_word_width(words[i], scale);
-    space = ly_word_width(" ", scale);
-    float total = space * (float)(count - 1);
-    for (int i = 0; i < count; i++) total += widths[i];
-    if (total > 372.0f) {
-        const float f = 372.0f / total;
-        scale *= f; space *= f; total = 372.0f;
-        for (int i = 0; i < count; i++) widths[i] *= f;
+    const float pitch = 30.0f * scale, sp = L->sp1 * scale;
+    int total_chars = 0, vis = 0, used = 0;
+    if (style == 2) {                                              /* Typewriter works on characters, not words */
+        total_chars = ly_utf8_count(line);
+        const float reveal = ly_smooth(ly_clamp01(el / (float)(total_chars < 16 ? 500 : 900 + total_chars * 6)));
+        vis = (int)((float)total_chars * reveal + 0.5f);
+        if (vis < 1) vis = 1;
     }
-    const float ytop = y - (scale - sc) * 14.0f;                   /* keep the text centred when the size changes */
-    float x = cx - total * 0.5f;
-    for (int i = 0; i < count; i++) {
-        float a = alpha, wy = dy;
-        Rgb col = base;
-        const float pos = (float)i / (float)count;                 /* where this word sits in the line, 0..1 */
-        if (style == 0) col = mix_rgb(base, th_bg, (int)(tint * 70.0f));
-        else if (style == 1) {
-            /* each word owns a slice of the line; its fill follows the playhead smoothly */
-            const float fill = ly_smooth(progress * (float)count - (float)i);
-            col = mix_rgb(mix_rgb(base, th_bg, 78), base, (int)(fill * 255.0f));
-            const float glow = fill * (1.0f - fill) * 4.0f;        /* peaks while the word is being sung */
-            if (glow > 0.02f) col = mix_rgb(col, accent, (int)(ly_clamp01(glow) * 200.0f));
-            wy = -2.5f * ly_clamp01(glow);
-        } else if (style == 3) {
-            const float calm = 1.0f - ly_smooth(el / 2200.0f);     /* the wave fades away instead of running forever */
-            wy = sinf(el * 0.0068f - (float)i * 0.75f) * 3.2f * calm;
-        } else if (style == 7) {
-            const float t = ly_clamp01((el - pos * 380.0f) / 300.0f);
-            a = ly_ease_out(t);
-            wy = -12.0f * (1.0f - ly_ease_back(t));
+
+    for (int r = 0; r < rows; r++) {
+        const int a0 = L->brk[r], a1 = L->brk[r + 1];
+        float rw = sp * (float)(a1 - a0 - 1);
+        for (int i = a0; i < a1; i++) rw += L->w1[i] * scale;
+        const float x0 = cx - rw * 0.5f;
+        const float yc = cy + ((float)r - (float)(rows - 1) * 0.5f) * pitch;
+
+        if (style == 2) {
+            char rt[256], part[256];
+            ly_copy(rt, sizeof rt, line, L->ws[a0], L->we[a1 - 1]);
+            const int cnt = ly_utf8_count(rt);
+            const int take = vis - used;
+            used += cnt + 1;                                       /* +1: the space the wrap replaced */
+            if (take <= 0) continue;
+            ly_utf8_prefix(rt, take > cnt ? cnt : take, part, sizeof part);
+            const float pw = ly_word_width(part, scale);
+            if (ly_is_gothic(part)) lyfont_draw(part, x0 + pw * 0.5f, yc, scale, C(base), C2D_AlignCenter, text_z);
+            else ly_draw_text(part, x0, yc - 14.0f * ly_font_scale(scale), scale, C(base), C2D_AlignLeft, rw + 12.0f);
+            if (vis < total_chars && take <= cnt && !S.saver)      /* soft cursor at the reveal edge */
+                rrect(x0 + pw + 2.0f, yc - 11.0f, 2.0f, 20.0f, 1.0f, 0.12f, Ca(accent, 0.55f + 0.45f * sinf(el * 0.02f)));
+            continue;
         }
-        ly_put_word(words[i], x, ytop + dy + wy, widths[i], scale, col, a);
-        x += widths[i] + space;
+
+        float x = x0;
+        for (int i = a0; i < a1; i++) {
+            const float wid = L->w1[i] * scale;
+            float a = alpha, wy = 0.0f;
+            Rgb col = base;
+            if (style == 0) col = mix_rgb(base, th_bg, (int)(tint * 70.0f));
+            else if (style == 1) {
+                const float calm = 1.0f - ly_smooth(el / 2200.0f);  /* the wave fades away instead of running forever */
+                wy = sinf(el * 0.0068f - (float)i * 0.75f) * 3.2f * calm;
+            } else if (style == 3) {
+                col = mix_rgb(base, accent, (int)(ly_clamp01(pulse) * 110.0f));
+            } else if (style == 4) {
+                const float t = ly_clamp01((el - ((float)i / (float)nw) * 380.0f) / 300.0f);
+                a = ly_ease_out(t);
+                wy = -12.0f * (1.0f - ly_ease_back(t));
+            }
+            char w[96];
+            ly_copy(w, sizeof w, line, L->ws[i], L->we[i]);
+            ly_put_word(w, x, yc - 14.0f * ly_font_scale(scale) + wy, wid, scale, col, a);
+            x += wid + sp;
+        }
     }
 }
 
@@ -2373,47 +2513,36 @@ static void draw_lyrics_top(void)
         int elapsed_ms = idx >= 0 ? (int)pos - lyrics_time(idx) : 0;
         if (elapsed_ms < 0) elapsed_ms = 0;
         const bool fx = S.ly_animated && !S.saver && idx >= 0;
-        float energy = 0.0f;
-        if (fx && S.ly_anim_style == 6) {                          /* Beat: smoothed real analyzer level */
-            static float e_s = 0.0f;
-            float bands[AUDIO_VIS_BANDS], wave[AUDIO_VIS_WAVE], e = 0.0f;
-            if (audio_get_vis(bands, wave)) {
-                for (int q = 0; q < AUDIO_VIS_WAVE; q++) e += fabsf(wave[q]);
-                e /= (float)AUDIO_VIS_WAVE;
-            }
-            e_s += (e - e_s) * (e > e_s ? 0.45f : 0.12f);
-            energy = e_s;
+        const int style = fx ? S.ly_anim_style : -1;
+        const float pulse = (style == 3) ? ly_beat_pulse() : 0.0f;
+        /* A line wrapped onto several rows is taller than its 25 px slot: the lines around it are pushed away by the
+         * extra height (smoothly, following the glide) so nothing overlaps. */
+        float push = 0.0f;
+        for (int j = c0 - 1; j <= c0 + 1; j++) {
+            if (j < 0 || j >= n) continue;
+            const float wj = 1.0f - fabsf((float)j - ly_pos);
+            if (wj <= 0.0f) continue;
+            const LyLay *Lj = ly_active_layout(style, lyrics_text(j), 0.70f);
+            const float hj = (float)Lj->rows * 30.0f * Lj->scale;
+            if (hj > 25.0f) push += wj * (hj - 25.0f) * 0.5f;
         }
         for (int k = -3; k <= 3; k++) {
             const int i = c0 + k;
             if (i < 0 || i >= n) continue;
             const float d = (float)i - ly_pos, ad = fabsf(d);
-            const float cy = 118.0f + d * 25.0f + 3.0f * fmaxf(-1.0f, fminf(1.0f, d));
+            const float sgn = fmaxf(-1.0f, fminf(1.0f, d));
+            const float cy = 118.0f + d * 25.0f + 3.0f * sgn + push * sgn;
+            if (cy < 38.0f || cy > 206.0f) continue;                  /* keep clear of the header and the seek bar */
             const char *tx = lyrics_text(i);
             /* "focus" is 1 on the centre line and falls to 0 one line away, so lines brighten and grow as they arrive */
             const float focus = 1.0f - fminf(1.0f, ad);
             if (i == idx) {
-                int next_ms = idx + 1 < n ? lyrics_time(idx + 1) : lyrics_time(idx) + 3000;
-                int span_ms = next_ms - lyrics_time(idx);
-                if (span_ms < 500) span_ms = 500;
-                const float line_progress = ly_clamp01((float)elapsed_ms / (float)span_ms);
-                const float line_y = cy;
-                const float base_y = line_y - 14.0f * ly_font_scale(0.70f);
-                const float base_sc = fit_scale(tx, 0.70f, 372.0f);
-                const Rgb active_rgb = mix_rgb(th_acc, th_tx, 60);
-                if (fx) {
-                    ly_draw_active(S.ly_anim_style, tx, 200.0f, base_y, base_sc, elapsed_ms, line_progress, active_rgb, th_acc, energy);
-                } else {
-                    if (!ly_gothic_line(tx, 200.0f, line_y, base_sc, active_rgb, 0.0f, 372.0f))
-                        ly_draw_text(tx, 200.0f, base_y, base_sc, C(active_rgb), C2D_AlignCenter, 372);
-                }
+                ly_draw_active(style, tx, 200.0f, cy, 0.70f, elapsed_ms, mix_rgb(th_acc, th_tx, 60), th_acc, pulse);
             } else {
                 const float a = ly_clamp01(1.0f - ad * 0.30f) * (0.70f + 0.30f * (1.0f - focus));
                 if (a < 0.06f) continue;
                 const float sc = 0.46f + 0.10f * focus;               /* the neighbour swells slightly as it becomes current */
-                const Rgb dim = mix_rgb(mix_rgb(th_tx, th_bg, 55), th_bg, (int)((1.0f - a) * 255.0f));
-                if (!ly_gothic_line(tx, 200, cy, sc + 0.14f, dim, 0.0f, 372.0f))
-                    ly_draw_text(tx, 200, cy - 14.0f * ly_font_scale(sc), sc, Ca(mix_rgb(th_tx, th_bg, 55), a), C2D_AlignCenter, 372);
+                ly_draw_rows(tx, 200.0f, cy, ly_is_gothic(tx) ? sc + 0.14f : sc, 0.62f, mix_rgb(th_tx, th_bg, 55), a, LY_EDGE_W);
             }
         }
     } else {
@@ -2432,8 +2561,9 @@ static void draw_lyrics_top(void)
             float a = fminf((y - 28.0f) / 12.0f, (206.0f - y) / 12.0f);
             if (a <= 0.02f) continue;
             if (a > 1.0f) a = 1.0f;
-            if (!ly_gothic_line(lyrics_text(i), 200, y + 10.0f, 0.60f, mix_rgb(th_bg, th_tx, (int)(a * 255.0f)), 0.0f, 366.0f))
-                ly_draw_text(lyrics_text(i), 200, y + 14.0f * (0.50f - ly_font_scale(0.50f)), 0.50f, Ca(th_tx, a), C2D_AlignCenter, 366);
+            const char *tx = lyrics_text(i);
+            const bool g = ly_is_gothic(tx);
+            ly_draw_rows(tx, 200.0f, y + (g ? 10.0f : 7.0f), g ? 0.60f : 0.50f, 0.62f, th_tx, a, LY_EDGE_W);
         }
         if (n > 7) {                                                   /* scroll position */
             rrect(391, 36, 4, 164, 2, 0.08f, cTrk);
@@ -2836,7 +2966,7 @@ static const char *UI_DISPLAY_NAMES[4]   = { "Cover", "LED Spectrum", "Scope", "
 static const char *UI_BATT_NAMES[2]      = { "Icon", "Percent" };
 static const char *UI_CLOCK_NAMES[3]     = { "Off", "12-hour", "24-hour" };
 static const char *UI_LY_FONT_NAMES[4]   = { "Gothic", "Bold", "Compact", "System" };
-static const char *UI_LY_ANIM_NAMES[8]   = { "Fade", "Karaoke", "Rise", "Ripple", "Typewriter", "Bloom", "Beat", "Cascade" };
+static const char *UI_LY_ANIM_NAMES[5]   = { "Fade", "Ripple", "Typewriter", "Beat", "Cascade" };
 static const char *UI_KB_FONT_NAMES[4]   = { "Gothic", "Bold", "System", "Compact" };
 
 /* ------------------------------------------------------------ settings UI */
@@ -2889,7 +3019,7 @@ static void row_value(int r, char *out, size_t cap)
     case ROW_CLOCK:     s = UI_CLOCK_NAMES[(unsigned)S.clock_mode % 3]; break;
     case ROW_GLOWCOL:   s = GLOWCOL_NAMES[(unsigned)S.glow_color % GLOWCOL_COUNT]; break;
     case ROW_BATTSTYLE: s = UI_BATT_NAMES[(unsigned)S.batt_style % 2]; break;
-    case ROW_LY_STYLE:  s = UI_LY_ANIM_NAMES[(unsigned)S.ly_anim_style % 8]; break;
+    case ROW_LY_STYLE:  s = UI_LY_ANIM_NAMES[(unsigned)S.ly_anim_style % 5]; break;
     case ROW_LY_FONT:   s = UI_LY_FONT_NAMES[(unsigned)S.ly_font % 4]; break;
     case ROW_KB_FONT:   s = UI_KB_FONT_NAMES[(unsigned)S.kb_font % 4]; break;
     case ROW_SEEK:      snprintf(out, cap, "%d s", S.seek_step); return;
