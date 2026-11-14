@@ -37,7 +37,6 @@ typedef struct {
     bool ly_search;                  /* lyrics: look online automatically when the lyrics screen opens */
     bool ly_download;                /* lyrics: keep downloaded lyrics in the SD cache */
     bool ly_offline;                 /* lyrics: never use the network, cache only */
-    bool ly_sync;                    /* lyrics: prefer synchronized (LRC) lyrics */
     bool ly_animated;                /* lyrics: animate line transitions and scrolling */
     int  ly_anim_style;              /* lyrics animation style: 0..7 */
     int  ly_font;                    /* lyrics text style: 0 = Gothic, 1 = Bold, 2 = Compact, 3 = System */

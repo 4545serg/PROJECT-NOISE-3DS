@@ -110,7 +110,7 @@ fit (Display) scrolls: the highlight scrolls it with the D-pad, and the small ar
   **Battery saver**.
 - **Timers** - a **Sleep timer** switch with a 5 / 10 / 15 / 30 / 45 / 60-minute **Timer length** (the countdown
   shows on the top screen; changing the duration restarts a running timer).
-- **Library** - lyrics: **Automatic search**, **Auto download**, **Offline only**, **Prefer synced**, **Animated lyrics**,
+- **Library** - lyrics: **Automatic search**, **Auto download**, **Offline only**, **Animated lyrics**,
   **Animation style**, **Lyrics font** and **Clear lyrics cache** (see Lyrics below).
 - **About** - **Replay guide**, **Exit app** (asks for confirmation) and the PROJECT NOISE / **MADE BY GRIMZZZZ** credit.
 
@@ -135,7 +135,7 @@ one, and the length must roughly match. Title / artist are cleaned before search
 `A; B` credits). Synchronized (LRC) lyrics highlight the current line and scroll with the song;
 plain lyrics scroll with the D-pad. Searching runs on a background thread, so playback never waits for it.
 Settings > Library: *Automatic search* (look online when the lyrics screen opens; off = press A), *Auto download*
-(keep results in the SD cache; off = shown only), *Offline only* (cache and `.lrc` files only), *Prefer synced*,
+(keep results in the SD cache; off = shown only), *Offline only* (cache and `.lrc` files only),
 *Clear lyrics cache*. Songs nobody has are remembered for 7 days so they are not searched again.
 
 PROJECT NOISE uses the devkitPro 3DS curl + mbedTLS stack for online lyrics (the native http:C path is only a fallback). The app initializes the 3DS SOC socket service before libcurl. Building requires the `3ds-curl` and `3ds-mbedtls` devkitPro portlibs.
@@ -283,7 +283,7 @@ Licenses and attribution: see `LICENSE` and `THIRD_PARTY_NOTICES.md`.
 ### Play with the lid closed
 
 Settings > Background Playback > **Play lid closed** (off by default, saved as `lid_play`). While it is on and a song is playing,
-the console is not allowed to sleep, so closing the lid keeps the music going (L / R still skip). The screens are
+the console is not allowed to sleep, so closing the lid keeps the music going (**double-press** L / R to skip, so a stray press in a pocket does nothing). The screens are
 switched off while the lid is shut and come back when you open it. Pausing or stopping (or the sleep timer ending)
 lets the console sleep as normal. With the switch off, closing the lid pauses and sleeps like before. Playing with
 the lid closed uses more battery than system sleep, so turn it off when you do not need it.

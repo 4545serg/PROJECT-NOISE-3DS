@@ -18,6 +18,8 @@ const C2D_Image *art_image(void);
 void  art_shutdown(void);
 /* Build a standalone 128x128 texture from JPEG/PNG data (used by the cover-flow cache). */
 bool  art_build_tex(C3D_Tex *tex, const unsigned char *data, size_t size);
+/* Any size up to tw x th (powers of two): boot screen art. *iw / *ih = the image's own size inside the texture. */
+bool  art_build_tex_ex(C3D_Tex *tex, const unsigned char *data, size_t size, int tw, int th, int *iw, int *ih);
 /* Split version for background loading: art_decode() is pure CPU (any thread), art_upload()
  * creates the GPU texture (main thread). `px` is ART_SIZE*ART_SIZE*4 bytes in GPU layout. */
 #define ART_PIXEL_BYTES (128 * 128 * 4)

@@ -9,7 +9,7 @@ Brand assets in `resources/`:
 - `boot_top.png`: 800x480 top-screen boot artwork (4:3 pixel-doubled 400x240)
 - `boot_bottom.png`: 640x480 bottom-screen boot artwork (pixel-doubled 320x240)
 
-`boot_top.png` / `boot_bottom.png` are kept as reference artwork and are not loaded at runtime (a full-screen texture would cost startup time and memory on an Old 3DS). The in-app boot screen is drawn with citro2d from the embedded branded cover, so it adds no assets and no dependencies.
+The live boot screen uses the Neon Crown art in `resources/boot_art/` (built by `tools/make_boot.py`, embedded in `source/boot_art.h`). `boot_top.png` / `boot_bottom.png` are older reference artwork and are not loaded at runtime (a full-screen texture would cost startup time and memory on an Old 3DS). The in-app boot screen is drawn with citro2d from the embedded branded cover, so it adds no assets and no dependencies.
 
 ## Settings
 Seven sections - Playback, Audio, Display, Background Playback, Timers, Library, About - chosen with a rounded switcher bar (tap left / right half) with page dots beside the title. See `README.md` for which rows live where.

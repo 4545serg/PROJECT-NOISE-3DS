@@ -106,7 +106,6 @@ void settings_defaults(Settings *s)
     s->ly_search = true;
     s->ly_download = true;
     s->ly_offline = false;
-    s->ly_sync = true;
     s->ly_animated = true;
     s->ly_anim_style = 0;
     s->ly_font = 0;
@@ -197,8 +196,6 @@ void settings_load(Settings *s)
             s->ly_download = atoi(value) != 0;
         else if (!strcmp(key, "ly_offline"))
             s->ly_offline = atoi(value) != 0;
-        else if (!strcmp(key, "ly_sync"))
-            s->ly_sync = atoi(value) != 0;
         else if (!strcmp(key, "ly_animated"))
             s->ly_animated = atoi(value) != 0;
         else if (!strcmp(key, "ly_anim_style"))
@@ -292,7 +289,6 @@ bool settings_save(const Settings *s)
     fprintf(f, "ly_search=%d\n", s->ly_search ? 1 : 0);
     fprintf(f, "ly_download=%d\n", s->ly_download ? 1 : 0);
     fprintf(f, "ly_offline=%d\n", s->ly_offline ? 1 : 0);
-    fprintf(f, "ly_sync=%d\n", s->ly_sync ? 1 : 0);
     fprintf(f, "ly_animated=%d\n", s->ly_animated ? 1 : 0);
     fprintf(f, "ly_anim_style=%d\n", s->ly_anim_style);
     fprintf(f, "ly_font=%d\n", s->ly_font);

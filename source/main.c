@@ -24,6 +24,7 @@
 #include "lyfont.h"
 #include "meta.h"
 #include "placeholder.h"
+#include "boot_art.h"
 #include "search.h"
 #include "settings.h"
 #include "noise.h"
@@ -61,7 +62,7 @@ enum {                         /* settings rows, grouped in seven pages; this or
     ROW_CLOCK, ROW_BATT, ROW_BATTSTYLE,                                        /* Display                     */
     ROW_LID, ROW_SAVER,                                                        /* Background Playback         */
     ROW_SLEEP_ENABLE, ROW_SLEEP_TIMER,                                         /* Timers                      */
-    ROW_LY_SEARCH, ROW_LY_DL, ROW_LY_OFFLINE, ROW_LY_SYNC, ROW_LY_ANIM, ROW_LY_STYLE, ROW_LY_FONT, ROW_LY_CLEAR, /* Library */
+    ROW_LY_SEARCH, ROW_LY_DL, ROW_LY_OFFLINE, ROW_LY_ANIM, ROW_LY_STYLE, ROW_LY_FONT, ROW_LY_CLEAR, /* Library */
     ROW_GUIDE, ROW_EXIT,                                                       /* About                       */
     SET_ROWS
 };
@@ -74,7 +75,7 @@ static const int   ROWS_PLAYBACK[]   = { ROW_RESUME, ROW_SEEK, ROW_INFO };
 static const int   ROWS_DISPLAY[]    = { ROW_OLED, ROW_GLOWCOL, ROW_GLOW, ROW_DYN, ROW_DISPLAY, ROW_FADE, ROW_KB_FONT, ROW_CLOCK, ROW_BATT, ROW_BATTSTYLE };
 static const int   ROWS_BACKGROUND[] = { ROW_LID, ROW_SAVER };
 static const int   ROWS_TIMERS[]     = { ROW_SLEEP_ENABLE, ROW_SLEEP_TIMER };
-static const int   ROWS_LIBRARY[]    = { ROW_LY_SEARCH, ROW_LY_DL, ROW_LY_OFFLINE, ROW_LY_SYNC, ROW_LY_ANIM, ROW_LY_STYLE, ROW_LY_FONT, ROW_LY_CLEAR };
+static const int   ROWS_LIBRARY[]    = { ROW_LY_SEARCH, ROW_LY_DL, ROW_LY_OFFLINE, ROW_LY_ANIM, ROW_LY_STYLE, ROW_LY_FONT, ROW_LY_CLEAR };
 static const int   ROWS_ABOUT[]      = { ROW_GUIDE, ROW_EXIT };
 static const int   ROWS_SETUP[]      = { ROW_PRESET, ROW_GLOW, ROW_CLOCK, ROW_BATT };
 static const int  *CARD_ROWS[CARD_COUNT] = { ROWS_PLAYBACK, NULL, ROWS_DISPLAY, ROWS_BACKGROUND, ROWS_TIMERS, ROWS_LIBRARY, ROWS_ABOUT, ROWS_SETUP };
@@ -879,7 +880,7 @@ static bool is_switch_row(int r)
 {
     return r == ROW_BATT || r == ROW_SLEEP_ENABLE || r == ROW_EQMAN || r == ROW_OLED || r == ROW_DYN ||
            r == ROW_INFO || r == ROW_RESUME || r == ROW_LID || r == ROW_SAVER ||
-           r == ROW_LY_SEARCH || r == ROW_LY_DL || r == ROW_LY_OFFLINE || r == ROW_LY_SYNC || r == ROW_LY_ANIM;
+           r == ROW_LY_SEARCH || r == ROW_LY_DL || r == ROW_LY_OFFLINE || r == ROW_LY_ANIM;
 }
 static bool is_band_row(int r)   { return r >= ROW_B0 && r <= ROW_B4; }
 static bool is_choice_row(int r) { return r == ROW_PRESET || r == ROW_EQPRE || r == ROW_CLOCK || r == ROW_GLOW || r == ROW_FADE || r == ROW_DISPLAY || r == ROW_WALLPAPER || r == ROW_SEEK || r == ROW_SLEEP_TIMER || r == ROW_GLOWCOL || r == ROW_BATTSTYLE || r == ROW_LY_STYLE || r == ROW_LY_FONT || r == ROW_KB_FONT; }
@@ -1155,8 +1156,6 @@ static void set_adjust(int dir)
         S.ly_download = !S.ly_download;
     } else if (set_row == ROW_LY_OFFLINE) {
         S.ly_offline = !S.ly_offline;
-    } else if (set_row == ROW_LY_SYNC) {
-        S.ly_sync = !S.ly_sync;
     } else if (set_row == ROW_LY_ANIM) {
         S.ly_animated = !S.ly_animated;
     } else if (set_row == ROW_LY_STYLE) {
@@ -2154,8 +2153,19 @@ static bool ly_gothic_line(const char *s, float x, float yc, float sc, Rgb col, 
     return true;
 }
 
-/* Karaoke mode uses line timestamps to estimate word progression. Standard LRC files do not
- * contain per-word timing, so this is a lightweight evenly-spaced estimate within each line. */
+/* ---------------------------------------------------------------- lyric line animations
+ * Every effect is a pure function of (time since the line started, progress through the line), so it is
+ * frame-rate independent, restarts cleanly on seek, and costs a handful of float ops per word.
+ * Standard LRC has no per-word timing, so word-level effects spread the words evenly across the line. */
+static float ly_clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
+static float ly_ease_out(float t) { t = 1.0f - ly_clamp01(t); return 1.0f - t * t * t; }              /* cubic out  */
+static float ly_ease_back(float t)                                                                    /* soft overshoot */
+{
+    t = ly_clamp01(t) - 1.0f;
+    return 1.0f + t * t * (2.2f * t + 1.2f);
+}
+static float ly_smooth(float t) { t = ly_clamp01(t); return t * t * (3.0f - 2.0f * t); }
+
 static float ly_word_width(const char *word, float sc)
 {
     if (S.ly_font == 0 && lyfont_ok() && lyfont_can(word)) return lyfont_width(word, sc);
@@ -2166,59 +2176,7 @@ static float ly_word_width(const char *word, float sc)
     return w;
 }
 
-static void ly_draw_karaoke(const char *line, float cx, float y, float sc, float progress, Rgb base, Rgb accent)
-{
-    char words[64][80];
-    float widths[64];
-    int count = 0;
-    const char *p = line;
-    while (*p && count < 64) {
-        while (*p && isspace((unsigned char)*p)) p++;
-        if (!*p) break;
-        size_t len = 0;
-        while (p[len] && !isspace((unsigned char)p[len]) && len < sizeof words[0] - 1) len++;
-        memcpy(words[count], p, len);
-        words[count][len] = 0;
-        widths[count] = ly_word_width(words[count], sc);
-        count++;
-        p += len;
-    }
-    if (count <= 0) return;
-
-    float space = ly_word_width(" ", sc);
-    float total = space * (float)(count - 1);
-    for (int i = 0; i < count; i++) total += widths[i];
-    if (total > 372.0f && total > 0.0f) {
-        const float fit = 372.0f / total;
-        sc *= fit;
-        for (int i = 0; i < count; i++) widths[i] *= fit;
-        space *= fit;
-        total = 372.0f;
-    }
-    const int active = (int)(progress * (float)count);
-    float x = cx - total * 0.5f;
-    for (int i = 0; i < count; i++) {
-        const Rgb col = i == active ? accent : (i < active ? base : mix_rgb(base, th_bg, 82));
-        float word_sc = sc;
-        float word_w = widths[i];
-        if (i == active) {
-            /* One restrained swell as the playhead passes through the word. */
-            float phase = progress * (float)count - (float)i;
-            float pulse = 1.0f + 0.075f * sinf(fmaxf(0.0f, fminf(1.0f, phase)) * 3.14159265f);
-            word_sc *= pulse;
-            word_w = ly_word_width(words[i], word_sc);
-        }
-        float draw_x = x + (widths[i] - word_w) * 0.5f;
-        if (S.ly_font == 0 && lyfont_ok() && lyfont_can(words[i]))
-            lyfont_draw(words[i], x + widths[i] * 0.5f, y + 14.0f * word_sc, word_sc, C(col), C2D_AlignCenter, text_z);
-        else
-            ly_draw_text(words[i], draw_x, y, word_sc, C(col), C2D_AlignLeft, word_w + 2.0f);
-        x += widths[i] + space;
-    }
-}
-
-/* UTF-8 safe prefix used by Typewriter: reveal complete code points, never half a Spanish
- * accent or a multi-byte symbol. The source lyric itself remains fully synchronized. */
+/* UTF-8 safe prefix (typewriter): whole code points only. */
 static void ly_utf8_prefix(const char *src, int chars, char *dst, size_t cap)
 {
     size_t n = 0;
@@ -2232,7 +2190,6 @@ static void ly_utf8_prefix(const char *src, int chars, char *dst, size_t cap)
     }
     dst[n] = 0;
 }
-
 static int ly_utf8_count(const char *s)
 {
     int n = 0;
@@ -2240,44 +2197,108 @@ static int ly_utf8_count(const char *s)
     return n;
 }
 
-static void ly_draw_typewriter(const char *line, float x, float y, float sc, float progress, Rgb col)
+/* one word at (x = left edge, y = top for the system font); alpha / scale already decided by the effect */
+static void ly_put_word(const char *w, float x, float y, float wid, float sc, Rgb col, float alpha)
 {
-    char part[320];
-    int count = ly_utf8_count(line);
-    int visible = (int)((float)count * progress + 0.5f);
-    if (visible < 1 && progress > 0.0f) visible = 1;
-    if (visible > count) visible = count;
-    ly_utf8_prefix(line, visible, part, sizeof part);
-    if (part[0]) {
-        if (!ly_gothic_line(part, x, y + 14.0f * sc, sc, col, 0.0f, 372.0f))
-            ly_draw_text(part, x, y, sc, C(col), C2D_AlignCenter, 372.0f);
-    }
+    if (alpha <= 0.01f) return;
+    if (S.ly_font == 0 && lyfont_ok() && lyfont_can(w))
+        lyfont_draw(w, x + wid * 0.5f, y + 14.0f * sc, sc, Ca(col, alpha), C2D_AlignCenter, text_z);
+    else
+        ly_draw_text(w, x, y, sc, Ca(col, alpha), C2D_AlignLeft, wid + 4.0f);
 }
 
-/* Liquid Text uses a small per-word vertical wave. It is deliberately 2D and bounded so
- * it stays readable and inexpensive on the original 3DS. */
-static void ly_draw_liquid(const char *line, float cx, float y, float sc, float phase, Rgb col)
+/* Draws the ACTIVE line with the selected effect. y = top of the text (system-font convention).
+ *   0 Fade      the line dissolves in while the colour warms from dim to bright
+ *   1 Karaoke   a soft highlight sweeps word by word; sung words settle to full brightness
+ *   2 Rise      the line lifts up into place with a gentle overshoot
+ *   3 Ripple    a wave runs through the words, then calms to a still line
+ *   4 Typewriter  letters appear over the first part of the line, with a fading edge
+ *   5 Bloom     the line grows from slightly small to full size with a soft overshoot
+ *   6 Beat      the line breathes with the real audio level
+ *   7 Cascade   words drop in one after another */
+static void ly_draw_active(int style, const char *line, float cx, float y, float sc, int elapsed_ms, float progress,
+                           Rgb base, Rgb accent, float energy)
 {
-    char words[48][80]; float widths[48]; int count = 0;
+    const float el = (float)elapsed_ms;
+    const float enter = ly_clamp01(el / 380.0f);
+    char words[64][80];
+    float widths[64];
+    int count = 0;
+
+    if (style == 4) {                                              /* Typewriter works on characters, not words */
+        char part[320];
+        const int total = ly_utf8_count(line);
+        const float reveal = ly_smooth(ly_clamp01(el / (float)(total < 16 ? 500 : 900 + total * 6)));
+        int vis = (int)((float)total * reveal + 0.5f);
+        if (vis < 1) vis = 1;
+        if (vis > total) vis = total;
+        ly_utf8_prefix(line, vis, part, sizeof part);
+        const float w_full = ly_word_width(line, sc);
+        if (S.ly_font == 0 && lyfont_ok() && lyfont_can(line)) {
+            lyfont_draw(part, cx - w_full * 0.5f + ly_word_width(part, sc) * 0.5f, y + 14.0f * sc, sc, C(base), C2D_AlignCenter, text_z);
+        } else {
+            ly_draw_text(part, cx - w_full * 0.5f, y, sc, C(base), C2D_AlignLeft, 372.0f);
+        }
+        if (vis < total && !S.saver) {                             /* soft cursor at the reveal edge */
+            const float ex = cx - w_full * 0.5f + ly_word_width(part, sc) + 2.0f;
+            rrect(ex, y + 3.0f, 2.0f, 20.0f, 1.0f, 0.12f, Ca(accent, 0.55f + 0.45f * sinf(el * 0.02f)));
+        }
+        return;
+    }
+
     const char *p = line;
-    while (*p && count < 48) {
+    while (*p && count < 64) {
         while (*p && isspace((unsigned char)*p)) p++;
         if (!*p) break;
-        size_t len = 0; while (p[len] && !isspace((unsigned char)p[len]) && len < sizeof words[0] - 1) len++;
-        memcpy(words[count], p, len); words[count][len] = 0;
-        widths[count] = ly_word_width(words[count], sc); count++; p += len;
+        size_t len = 0;
+        while (p[len] && !isspace((unsigned char)p[len]) && len < sizeof words[0] - 1) len++;
+        memcpy(words[count], p, len);
+        words[count][len] = 0;
+        count++;
+        p += len;
     }
-    if (!count) return;
-    float space = ly_word_width(" ", sc), total = space * (float)(count - 1);
+    if (count <= 0) return;
+
+    /* whole-line transforms */
+    float scale = sc, dy = 0.0f, alpha = 1.0f, tint = 0.0f;
+    if (style == 0) { alpha = 0.10f + 0.90f * ly_smooth(el / 420.0f); tint = 1.0f - ly_smooth(el / 700.0f); }
+    else if (style == 2) { dy = 16.0f * (1.0f - ly_ease_back(el / 460.0f)); alpha = ly_ease_out(el / 300.0f); }
+    else if (style == 5) { scale = sc * (0.80f + 0.20f * ly_ease_back(el / 480.0f)); alpha = ly_ease_out(el / 260.0f); }
+    else if (style == 6) { scale = sc * (1.0f + ly_clamp01(energy * 0.9f) * 0.10f); }
+
+    float space;
+    for (int i = 0; i < count; i++) widths[i] = ly_word_width(words[i], scale);
+    space = ly_word_width(" ", scale);
+    float total = space * (float)(count - 1);
     for (int i = 0; i < count; i++) total += widths[i];
-    if (total > 372.0f) { float f = 372.0f / total; sc *= f; space *= f; total = 372.0f; for (int i=0;i<count;i++) widths[i] *= f; }
+    if (total > 372.0f) {
+        const float f = 372.0f / total;
+        scale *= f; space *= f; total = 372.0f;
+        for (int i = 0; i < count; i++) widths[i] *= f;
+    }
+    const float ytop = y - (scale - sc) * 14.0f;                   /* keep the text centred when the size changes */
     float x = cx - total * 0.5f;
     for (int i = 0; i < count; i++) {
-        float wave = sinf(phase * 5.0f - (float)i * 0.72f) * 2.4f;
-        if (S.ly_font == 0 && lyfont_ok() && lyfont_can(words[i]))
-            lyfont_draw(words[i], x + widths[i] * 0.5f, y + wave + 14.0f * sc, sc, C(col), C2D_AlignCenter, text_z);
-        else
-            ly_draw_text(words[i], x, y + wave, sc, C(col), C2D_AlignLeft, widths[i] + 2.0f);
+        float a = alpha, wy = dy;
+        Rgb col = base;
+        const float pos = (float)i / (float)count;                 /* where this word sits in the line, 0..1 */
+        if (style == 0) col = mix_rgb(base, th_bg, (int)(tint * 70.0f));
+        else if (style == 1) {
+            /* each word owns a slice of the line; its fill follows the playhead smoothly */
+            const float fill = ly_smooth(progress * (float)count - (float)i);
+            col = mix_rgb(mix_rgb(base, th_bg, 78), base, (int)(fill * 255.0f));
+            const float glow = fill * (1.0f - fill) * 4.0f;        /* peaks while the word is being sung */
+            if (glow > 0.02f) col = mix_rgb(col, accent, (int)(ly_clamp01(glow) * 200.0f));
+            wy = -2.5f * ly_clamp01(glow);
+        } else if (style == 3) {
+            const float calm = 1.0f - ly_smooth(el / 2200.0f);     /* the wave fades away instead of running forever */
+            wy = sinf(el * 0.0068f - (float)i * 0.75f) * 3.2f * calm;
+        } else if (style == 7) {
+            const float t = ly_clamp01((el - pos * 380.0f) / 300.0f);
+            a = ly_ease_out(t);
+            wy = -12.0f * (1.0f - ly_ease_back(t));
+        }
+        ly_put_word(words[i], x, ytop + dy + wy, widths[i], scale, col, a);
         x += widths[i] + space;
     }
 }
@@ -2336,124 +2357,63 @@ static void draw_lyrics_top(void)
     } else if (synced) {
         const int idx = lyrics_index_at(pos);
         const float goal = (float)idx;
-        /* Keep the line carousel eased for every style. Previously non-Slide styles snapped
-         * directly to the new line, which looked jerky whenever an LRC timestamp changed. */
+        /* The carousel glides toward the current line with a time-based ease (same feel at any frame rate);
+         * a long jump (seek, new song) snaps instead of sliding past dozens of lines. */
+        const u64 now_ms = osGetTime();
+        static u64 ly_prev_ms = 0;
+        float dt = ly_prev_ms ? (float)(now_ms - ly_prev_ms) * 0.001f : 0.016f;
+        ly_prev_ms = now_ms;
+        if (dt > 0.1f) dt = 0.1f;
         if (!S.ly_animated || S.saver || fabsf(goal - ly_pos) > 6.0f)
             ly_pos = goal;
         else
-            ly_pos += (goal - ly_pos) * 0.23f;
+            ly_pos += (goal - ly_pos) * (1.0f - expf(-dt * 11.0f));
+        if (fabsf(goal - ly_pos) < 0.003f) ly_pos = goal;
         const int c0 = (int)floorf(ly_pos + 0.5f);
         int elapsed_ms = idx >= 0 ? (int)pos - lyrics_time(idx) : 0;
         if (elapsed_ms < 0) elapsed_ms = 0;
-        /* Short, deterministic entrance envelope. Effects use only a few scalar
-         * operations and existing 2D primitives so they stay cheap on 3DS. */
-        float t = (float)elapsed_ms / 420.0f;
-        if (t > 1.0f) t = 1.0f;
-        const float inv = 1.0f - t;
-        const float ease = 1.0f - inv * inv * inv;
-        float active_alpha = 1.0f;
-        float active_scale = 0.78f;
-        float active_y = 0.0f;
-        float active_x = 0.0f;
-        if (S.ly_animated && !S.saver && idx >= 0) {
-            switch (S.ly_anim_style) {
-            case 0: /* Gothic Fade: soft dissolve with a restrained gothic halo. */
-                active_alpha = 0.05f + 0.95f * ease;
-                active_scale = 0.70f + 0.08f * ease;
-                break;
-            case 1: /* Word Pulse: the line stays still; the active word swells below. */
-                active_scale = 0.78f;
-                break;
-            case 2: /* Liquid Text: a low-amplitude wave moves through the words. */
-                active_scale = 0.78f;
-                break;
-            case 3: /* Cinematic Reveal: rise from below and brighten into focus. */
-                active_y = 20.0f * inv;
-                active_alpha = 0.18f + 0.82f * ease;
-                active_scale = 0.74f + 0.04f * ease;
-                break;
-            case 4: /* Glitch: short, deterministic RGB split only at line changes. */
-                active_x = elapsed_ms < 115 ? sinf((float)elapsed_ms * 0.19f) * 5.0f : 0.0f;
-                active_y = elapsed_ms < 115 ? cosf((float)elapsed_ms * 0.23f) * 1.5f : 0.0f;
-                break;
-            case 5: /* Typewriter reveals characters against the existing playback clock. */
-                active_scale = 0.78f;
-                break;
-            case 6: /* Waveform Lyrics reacts only to real analyzer data. */
-                active_scale = 0.78f;
-                break;
-            case 7: /* Particle Dissolve: materialize through a brief sparse particle pass. */
-                active_alpha = 0.20f + 0.80f * ease;
-                break;
-            default: break;
+        const bool fx = S.ly_animated && !S.saver && idx >= 0;
+        float energy = 0.0f;
+        if (fx && S.ly_anim_style == 6) {                          /* Beat: smoothed real analyzer level */
+            static float e_s = 0.0f;
+            float bands[AUDIO_VIS_BANDS], wave[AUDIO_VIS_WAVE], e = 0.0f;
+            if (audio_get_vis(bands, wave)) {
+                for (int q = 0; q < AUDIO_VIS_WAVE; q++) e += fabsf(wave[q]);
+                e /= (float)AUDIO_VIS_WAVE;
             }
+            e_s += (e - e_s) * (e > e_s ? 0.45f : 0.12f);
+            energy = e_s;
         }
         for (int k = -3; k <= 3; k++) {
             const int i = c0 + k;
             if (i < 0 || i >= n) continue;
             const float d = (float)i - ly_pos, ad = fabsf(d);
-            const float a = 1.0f - ad * 0.27f;
-            if (a < 0.08f) continue;
             const float cy = 118.0f + d * 25.0f + 3.0f * fmaxf(-1.0f, fminf(1.0f, d));
             const char *tx = lyrics_text(i);
+            /* "focus" is 1 on the centre line and falls to 0 one line away, so lines brighten and grow as they arrive */
+            const float focus = 1.0f - fminf(1.0f, ad);
             if (i == idx) {
-                const Rgb active_rgb = mix_rgb(th_bg, mix_rgb(th_acc, th_tx, 60), (int)(active_alpha * 255.0f));
-                const u32 active_col = Ca(active_rgb, active_alpha);
-                const float line_y = cy + active_y;
-                const float line_x = 200.0f + active_x;
-                /* No lyric backing plates or underlines: keep the text clean and unobstructed. */
                 int next_ms = idx + 1 < n ? lyrics_time(idx + 1) : lyrics_time(idx) + 3000;
                 int span_ms = next_ms - lyrics_time(idx);
                 if (span_ms < 500) span_ms = 500;
-                float line_progress = (float)elapsed_ms / (float)span_ms;
-                if (line_progress < 0.0f) line_progress = 0.0f;
-                if (line_progress > 0.999f) line_progress = 0.999f;
+                const float line_progress = ly_clamp01((float)elapsed_ms / (float)span_ms);
+                const float line_y = cy;
                 const float base_y = line_y - 14.0f * ly_font_scale(0.70f);
-                const float base_sc = fit_scale(tx, 0.70f, 372.0f) * (active_scale / 0.78f);
-                if (S.ly_animated && !S.saver && S.ly_anim_style == 1) {
-                    ly_draw_karaoke(tx, line_x, base_y, base_sc, line_progress, active_rgb, th_acc);
-                } else if (S.ly_animated && !S.saver && S.ly_anim_style == 2) {
-                    ly_draw_liquid(tx, line_x, base_y, base_sc, (float)elapsed_ms / 1000.0f, active_rgb);
-                } else if (S.ly_animated && !S.saver && S.ly_anim_style == 5) {
-                    ly_draw_typewriter(tx, line_x, base_y, base_sc, line_progress, active_rgb);
-                } else if (S.ly_animated && !S.saver && S.ly_anim_style == 6) {
-                    float bands[AUDIO_VIS_BANDS], wave[AUDIO_VIS_WAVE];
-                    float energy = 0.0f;
-                    if (audio_get_vis(bands, wave)) {
-                        for (int q = 0; q < AUDIO_VIS_WAVE; q++) energy += fabsf(wave[q]);
-                        energy /= (float)AUDIO_VIS_WAVE;
-                    }
-                    float react = 1.0f + fminf(0.12f, energy * 0.55f);
-                    if (!ly_gothic_line(tx, line_x, line_y, base_sc * react, active_rgb, 0.20f, 372.0f))
-                        ly_draw_text(tx, line_x, base_y, base_sc * react, active_col, C2D_AlignCenter, 372);
-                } else if (S.ly_animated && !S.saver && S.ly_anim_style == 3) {
-                    /* Characters stagger into view during the short entrance; playback time is untouched. */
-                    ly_draw_typewriter(tx, line_x, base_y, base_sc, ease, active_rgb);
-                } else if (S.ly_animated && !S.saver && S.ly_anim_style == 4 && elapsed_ms < 115) {
-                    Rgb red = { 255, 70, 90 }, blue = { 70, 190, 255 };
-                    unsigned seed = (unsigned)(idx * 1103515245u + (unsigned)(elapsed_ms / 24) * 12345u);
-                    float jitter = (float)((seed >> 16) & 7u) - 3.0f;
-                    ly_draw_text(tx, line_x - 3.0f - jitter, base_y, base_sc, Ca(red, 0.45f), C2D_AlignCenter, 372);
-                    ly_draw_text(tx, line_x + 3.0f + jitter, base_y, base_sc, Ca(blue, 0.45f), C2D_AlignCenter, 372);
-                    ly_draw_text(tx, line_x + active_x, base_y + active_y, base_sc, active_col, C2D_AlignCenter, 372);
+                const float base_sc = fit_scale(tx, 0.70f, 372.0f);
+                const Rgb active_rgb = mix_rgb(th_acc, th_tx, 60);
+                if (fx) {
+                    ly_draw_active(S.ly_anim_style, tx, 200.0f, base_y, base_sc, elapsed_ms, line_progress, active_rgb, th_acc, energy);
                 } else {
-                    if (S.ly_animated && !S.saver && S.ly_anim_style == 7 && elapsed_ms < 360) {
-                        for (int q = 0; q < 10; q++) {
-                            float ph = (float)(q * 37 + idx * 13);
-                            float px = line_x + sinf(ph) * (18.0f + 42.0f * inv);
-                            float py = line_y + cosf(ph * 1.7f) * (5.0f + 14.0f * inv);
-                            C2D_DrawCircleSolid(px, py, 0.11f, 1.0f + 1.2f * inv, Ca(th_acc, 0.45f * inv));
-                        }
-                    }
-                    if (S.ly_anim_style == 0 && !ly_gothic_line(tx, line_x, line_y, active_scale, active_rgb, 0.48f * active_alpha, 372.0f))
-                        ly_draw_text(tx, line_x, base_y, base_sc, active_col, C2D_AlignCenter, 372);
-                    else if (S.ly_anim_style != 0 && !ly_gothic_line(tx, line_x, line_y, active_scale, active_rgb, 0.18f * active_alpha, 372.0f))
-                        ly_draw_text(tx, line_x, base_y, base_sc, active_col, C2D_AlignCenter, 372);
+                    if (!ly_gothic_line(tx, 200.0f, line_y, base_sc, active_rgb, 0.0f, 372.0f))
+                        ly_draw_text(tx, 200.0f, base_y, base_sc, C(active_rgb), C2D_AlignCenter, 372);
                 }
             } else {
+                const float a = ly_clamp01(1.0f - ad * 0.30f) * (0.70f + 0.30f * (1.0f - focus));
+                if (a < 0.06f) continue;
+                const float sc = 0.46f + 0.10f * focus;               /* the neighbour swells slightly as it becomes current */
                 const Rgb dim = mix_rgb(mix_rgb(th_tx, th_bg, 55), th_bg, (int)((1.0f - a) * 255.0f));
-                if (!ly_gothic_line(tx, 200, cy, 0.60f, dim, 0.0f, 372.0f))
-                    ly_draw_text(tx, 200, cy - 14.0f * ly_font_scale(0.46f), 0.46f, Ca(mix_rgb(th_tx, th_bg, 55), a), C2D_AlignCenter, 372);
+                if (!ly_gothic_line(tx, 200, cy, sc + 0.14f, dim, 0.0f, 372.0f))
+                    ly_draw_text(tx, 200, cy - 14.0f * ly_font_scale(sc), sc, Ca(mix_rgb(th_tx, th_bg, 55), a), C2D_AlignCenter, 372);
             }
         }
     } else {
@@ -2876,7 +2836,7 @@ static const char *UI_DISPLAY_NAMES[4]   = { "Cover", "LED Spectrum", "Scope", "
 static const char *UI_BATT_NAMES[2]      = { "Icon", "Percent" };
 static const char *UI_CLOCK_NAMES[3]     = { "Off", "12-hour", "24-hour" };
 static const char *UI_LY_FONT_NAMES[4]   = { "Gothic", "Bold", "Compact", "System" };
-static const char *UI_LY_ANIM_NAMES[8]   = { "Gothic Fade", "Word Pulse", "Liquid Text", "Cinematic Reveal", "Glitch", "Typewriter", "Waveform Lyrics", "Particle Dissolve" };
+static const char *UI_LY_ANIM_NAMES[8]   = { "Fade", "Karaoke", "Rise", "Ripple", "Typewriter", "Bloom", "Beat", "Cascade" };
 static const char *UI_KB_FONT_NAMES[4]   = { "Gothic", "Bold", "System", "Compact" };
 
 /* ------------------------------------------------------------ settings UI */
@@ -2906,7 +2866,6 @@ static const char *row_label(int r)
     case ROW_LY_SEARCH:    return "Automatic search";
     case ROW_LY_DL:        return "Auto download";
     case ROW_LY_OFFLINE:   return "Offline only";
-    case ROW_LY_SYNC:      return "Prefer synced";
     case ROW_LY_ANIM:      return "Animated lyrics";
     case ROW_LY_STYLE:     return "Animation style";
     case ROW_LY_FONT:      return "Lyrics font";
@@ -2952,7 +2911,6 @@ static bool row_switch_on(int r)
     if (r == ROW_LY_SEARCH)    return S.ly_search;
     if (r == ROW_LY_DL)        return S.ly_download;
     if (r == ROW_LY_OFFLINE)   return S.ly_offline;
-    if (r == ROW_LY_SYNC)      return S.ly_sync;
     if (r == ROW_LY_ANIM)      return S.ly_animated;
     if (r == ROW_EQMAN)        return S.eq_manual;
     if (r == ROW_SLEEP_ENABLE) return sleep_timer_active;
@@ -3666,7 +3624,7 @@ static LyOptions ly_opts(void)
     o.auto_search = S.ly_search;
     o.auto_download = S.ly_download;
     o.offline_only = S.ly_offline;
-    o.prefer_synced = S.ly_sync;
+    o.prefer_synced = true;     /* synced lyrics are always preferred; plain text is the fallback */
     return o;
 }
 
@@ -3929,6 +3887,121 @@ static C3D_Tex           ld_logo_tex;
 static bool              ld_logo_ok = false;
 static Tex3DS_SubTexture ld_logo_sub = { 128, 128, 0.0f, 1.0f, 1.0f, 0.0f };
 
+/* Neon Crown boot art (see tools/make_boot.py): full-screen textures, loaded once and freed when the player appears.
+ * If a texture cannot be built (low memory) the original drawn boot screen below is used instead. */
+static C3D_Tex           ld_tex_top, ld_tex_bot, ld_tex_press;
+static Tex3DS_SubTexture ld_sub_top, ld_sub_bot, ld_sub_press;
+static bool              ld_art_ok = false;
+static int               ld_done_frame = 0;
+
+static bool ld_load_one(C3D_Tex *tex, Tex3DS_SubTexture *sub, const unsigned char *data, size_t len, int tw, int th)
+{
+    int w = 0, h = 0;
+    if (!art_build_tex_ex(tex, data, len, tw, th, &w, &h)) return false;
+    sub->width = (u16)w; sub->height = (u16)h;
+    sub->left = 0.0f; sub->top = 1.0f;
+    sub->right = (float)w / (float)tw;
+    sub->bottom = 1.0f - (float)h / (float)th;
+    return true;
+}
+
+static void ld_art_load(void)
+{
+    ld_art_ok = false;
+    if (!ld_load_one(&ld_tex_top, &ld_sub_top, boot_top_jpg, boot_top_jpg_len, 512, 256)) return;
+    if (!ld_load_one(&ld_tex_bot, &ld_sub_bot, boot_bottom_jpg, boot_bottom_jpg_len, 512, 256)) { C3D_TexDelete(&ld_tex_top); return; }
+    if (!ld_load_one(&ld_tex_press, &ld_sub_press, boot_press_png, boot_press_png_len, 512, 64)) {
+        C3D_TexDelete(&ld_tex_top); C3D_TexDelete(&ld_tex_bot); return;
+    }
+    ld_art_ok = true;
+}
+
+static void ld_art_free(void)
+{
+    if (!ld_art_ok) return;
+    C3D_TexDelete(&ld_tex_top); C3D_TexDelete(&ld_tex_bot); C3D_TexDelete(&ld_tex_press);
+    ld_art_ok = false;
+}
+
+static void ld_top_art(float t)
+{
+    char buf[96];
+    const C2D_Image img = { &ld_tex_top, &ld_sub_top };
+    C2D_DrawImageAt(img, 0, 0, 0.20f, NULL, 1.0f, 1.0f);
+
+    /* dark fade at the bottom so the progress readout stays legible over the flames */
+    const u32 clear = C2D_Color32(4, 0, 12, 0), solid = C2D_Color32(4, 0, 12, 215);
+    C2D_DrawRectangle(0, 190, 0.26f, TOP_W, 50, clear, clear, solid, solid);
+
+    const float px = 110, py = 212, pw = 180, ph = 4;
+    const u32 cLine = C2D_Color32(168, 92, 255, 255);
+    rrect(px - 1, py - 1, pw + 2, ph + 2, 3.0f, 0.27f, C2D_Color32(120, 50, 230, 60));      /* soft outer glow */
+    rrect(px, py, pw, ph, 2.0f, 0.28f, C2D_Color32(60, 24, 110, 200));
+    float fw = pw * ld.shown;
+    if (fw > pw) fw = pw;
+    if (fw >= 4.0f) rrect(px, py, fw, ph, 2.0f, 0.30f, cLine);
+    if (!S.saver && !ld.done && fw > 10.0f) {                    /* light sweep over the filled part */
+        const float sx = px + fmodf(t * 110.0f, fw + 36.0f) - 36.0f;
+        const float x0 = sx < px ? px : sx, x1 = (sx + 36.0f > px + fw) ? px + fw : sx + 36.0f;
+        if (x1 > x0) C2D_DrawRectSolid(x0, py, 0.31f, x1 - x0, ph, C2D_Color32(255, 255, 255, 80));
+    }
+
+    const u32 cTxt = C2D_Color32(200, 160, 255, 255);
+    const int dots = ((int)(t * 3.0f)) % 4;
+    snprintf(buf, sizeof buf, "%s%.*s", ld.task < LOAD_N ? LOAD_TASKS[ld.task].name : "Ready", ld.task < LOAD_N ? dots : 0, "...");
+    draw_text(buf, 200, 192, 0.34f, cTxt, C2D_AlignCenter, 260);
+    snprintf(buf, sizeof buf, "%d%%", (int)(ld.shown * 100.0f + 0.5f));
+    draw_text(buf, px + pw + 8, py - 5, 0.32f, cLine, C2D_AlignLeft, 40);
+}
+
+/* live equaliser where the painted bars used to be: segmented columns, tallest in the middle like the art */
+static void ld_eq_live(float t, float calm)
+{
+    enum { N = 34 };
+    const float x0 = (float)BOOT_EQ_X0, span = (float)(BOOT_EQ_X1 - BOOT_EQ_X0);
+    const float pitch = span / (float)N, bwid = pitch - 2.0f;
+    const float base = (float)BOOT_EQ_BASE - 24.0f, maxh = (float)(BOOT_EQ_BASE - BOOT_EQ_TOP) - 8.0f;   /* bars sit above the credit line */
+    const float seg = 4.0f;
+    for (int i = 0; i < N; i++) {
+        const float u = ((float)i - (float)(N - 1) * 0.5f) / ((float)N * 0.30f);
+        const float env = 0.30f + 0.70f * expf(-u * u);
+        float lvl = 0.5f + 0.5f * sinf(t * 4.2f + (float)i * 0.93f + sinf(t * 1.7f + (float)i * 0.51f) * 2.0f);
+        if (S.saver) lvl = 0.5f;
+        lvl = env * (0.22f + 0.78f * lvl);
+        lvl = 0.10f + (lvl - 0.10f) * calm;                    /* calmer once loading is finished */
+        float h = floorf(lvl * maxh / seg) * seg;
+        if (h < seg) h = seg;
+        const float bx = x0 + (float)i * pitch;
+        const u32 top = C2D_Color32(196, 120, 255, 255), bot = C2D_Color32(104, 34, 224, 255);
+        C2D_DrawRectangle(bx, base - h, 0.30f, bwid, h, top, top, bot, bot);
+    }
+    const u32 gap = C2D_Color32(6, 2, 16, 255);                /* segment gaps: thin dark lines across all bars */
+    for (float y = base - seg; y > base - maxh - 1.0f; y -= seg)
+        C2D_DrawRectSolid(x0 - 1.0f, y, 0.32f, span + 2.0f, 1.0f, gap);
+}
+
+static void ld_bottom_art(float t)
+{
+    const C2D_Image img = { &ld_tex_bot, &ld_sub_bot };
+    C2D_DrawImageAt(img, 0, 0, 0.20f, NULL, 1.0f, 1.0f);
+
+    float calm = 1.0f;
+    if (ld.done) {
+        const float k = (float)(ld.frame - ld_done_frame) / 60.0f;
+        calm = 0.55f;
+        /* "Press A to continue": fades in, then breathes */
+        float a = k / 0.45f; if (a > 1.0f) a = 1.0f;
+        a *= 0.80f + 0.20f * sinf(k * 3.6f);
+        C2D_ImageTint tint;
+        C2D_AlphaImageTint(&tint, a);
+        const C2D_Image pimg = { &ld_tex_press, &ld_sub_press };
+        C2D_DrawImageAt(pimg, (float)BOOT_PRESS_X, (float)BOOT_PRESS_Y, 0.34f, &tint, 1.0f, 1.0f);
+    }
+    ld_eq_live(t, calm);
+    /* credit: centred at the bottom, clearly smaller than the "Press A to continue" line */
+    draw_text("MADE BY GRIMZZZZ", 160, 220, 0.46f, C2D_Color32(190, 140, 255, 235), C2D_AlignCenter, 220);
+}
+
 static void ld_top(float t)
 {
     const u32 cAcc = C(th_acc), cDim = C(mix_rgb(th_tx, th_bg, 120));
@@ -4004,15 +4077,15 @@ static void ld_render(C3D_RenderTarget *top, C3D_RenderTarget *bot)
     art_commit();
     flow_pump();                                   /* upload a finished cover */
     C2D_TextBufClear(tbuf);
-    C2D_TargetClear(top, C(th_bg));
+    C2D_TargetClear(top, ld_art_ok ? C2D_Color32(0, 0, 0, 255) : C(th_bg));
     C2D_SceneBegin(top);
-    bg_gradient(TOP_W);
-    ld_top(t);
+    if (ld_art_ok) ld_top_art(t);
+    else { bg_gradient(TOP_W); ld_top(t); }
     if (veil > 0.01f) C2D_DrawRectSolid(0, 0, 0.95f, TOP_W, SCR_H, Ca(th_bg, veil));
-    C2D_TargetClear(bot, C(th_bg));
+    C2D_TargetClear(bot, ld_art_ok ? C2D_Color32(0, 0, 0, 255) : C(th_bg));
     C2D_SceneBegin(bot);
-    bg_gradient(BOT_W);
-    ld_bottom(t);
+    if (ld_art_ok) ld_bottom_art(t);
+    else { bg_gradient(BOT_W); ld_bottom(t); }
     if (veil > 0.01f) C2D_DrawRectSolid(0, 0, 0.95f, BOT_W, SCR_H, Ca(th_bg, veil));
     C3D_FrameEnd(0);
 }
@@ -4022,7 +4095,8 @@ static void startup_load(C3D_RenderTarget *top, C3D_RenderTarget *bot)
     memset(&ld, 0, sizeof ld);
     int total = 0, before = 0;
     for (int i = 0; i < LOAD_N; i++) total += LOAD_TASKS[i].weight;
-    ld_logo_ok = art_build_tex(&ld_logo_tex, placeholder_png, placeholder_png_len);
+    ld_art_load();
+    ld_logo_ok = !ld_art_ok && art_build_tex(&ld_logo_tex, placeholder_png, placeholder_png_len);   /* fallback mark */
 
     for (int i = 0; i < LOAD_N; i++) {
         ld.task = i;
@@ -4096,7 +4170,16 @@ static void startup_load(C3D_RenderTarget *top, C3D_RenderTarget *bot)
         ld_render(top, bot);
         if (ld.shown >= 0.995f) break;
     }
+    if (ld_art_ok) {                                           /* stay here until the A button is pressed */
+        ld_done_frame = ld.frame;
+        while (aptMainLoop()) {
+            hidScanInput();
+            if (hidKeysDown() & KEY_A) break;
+            ld_render(top, bot);
+        }
+    }
     for (int k = 1; k <= 6; k++) { ld.veil = (float)k / 6.0f; ld_render(top, bot); }
+    ld_art_free();
     if (ld_logo_ok) C3D_TexDelete(&ld_logo_tex);
     ld_logo_ok = false;
 }
@@ -4165,9 +4248,13 @@ int main(void)
                 if (sleep_timer_active && osGetTime() >= sleep_timer_deadline) {
                     sleep_timer_active = false; audio_stop(); apply_lid(); toast("Sleep timer ended");
                 }
-                if (kd & KEY_L) skip_prev();
-                if (kd & KEY_R) skip_next();
-                svcSleepThread(50 * 1000 * 1000LL);   /* 50 ms */
+                {   /* lid closed: a single bumper press is easy to hit by accident in a pocket, so skip on a double press */
+                    static u64 last_l = 0, last_r = 0;
+                    const u64 now = osGetTime();
+                    if (kd & KEY_L) { if (now - last_l <= 450) { skip_prev(); last_l = 0; } else last_l = now; }
+                    if (kd & KEY_R) { if (now - last_r <= 450) { skip_next(); last_r = 0; } else last_r = now; }
+                }
+                svcSleepThread(30 * 1000 * 1000LL);   /* 30 ms: short enough not to miss a quick double press */
                 continue;
             }
         }

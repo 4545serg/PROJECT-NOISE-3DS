@@ -108,6 +108,38 @@ bool art_upload(C3D_Tex *tex, const unsigned char *px)
     return true;
 }
 
+/* Decode JPEG/PNG into a texture of tw x th (powers of two, >= the image) - used for the boot screen art.
+ * The image sits in the top-left corner; *iw / *ih return its size so the caller can build a sub-texture. */
+bool art_build_tex_ex(C3D_Tex *tex, const unsigned char *data, size_t size, int tw, int th, int *iw, int *ih)
+{
+    int w = 0, h = 0, c = 0;
+    if (!stbi_info_from_memory(data, (int)size, &w, &h, &c) || w <= 0 || h <= 0 || w > tw || h > th) return false;
+    unsigned char *px = stbi_load_from_memory(data, (int)size, &w, &h, &c, 4);
+    if (!px) return false;
+    const size_t bytes = (size_t)tw * (size_t)th * 4;
+    unsigned char *out = calloc(1, bytes);
+    if (!out) { stbi_image_free(px); return false; }
+    for (int y = 0; y < h; y++) {
+        const unsigned char *row = px + (size_t)y * (size_t)w * 4;
+        for (int x = 0; x < w; x++) {
+            const unsigned char *p = row + (size_t)x * 4;
+            unsigned char *d = out + morton_offset((u32)x, (u32)y, 4) + ((u32)y & ~7u) * (u32)tw * 4;
+            d[0] = p[3]; d[1] = p[2]; d[2] = p[1]; d[3] = p[0];        /* GPU RGBA8 = bytes A,B,G,R */
+        }
+    }
+    stbi_image_free(px);
+    bool ok = C3D_TexInit(tex, tw, th, GPU_RGBA8);
+    if (ok) {
+        memcpy(tex->data, out, bytes);
+        GSPGPU_FlushDataCache(tex->data, bytes);
+        C3D_TexSetFilter(tex, GPU_LINEAR, GPU_LINEAR);
+        C3D_TexSetWrap(tex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
+        *iw = w; *ih = h;
+    }
+    free(out);
+    return ok;
+}
+
 /* Decode JPEG/PNG into a 128x128 GPU texture `tex` (caller owns / deletes it). */
 bool art_build_tex(C3D_Tex *tex, const unsigned char *data, size_t size)
 {
