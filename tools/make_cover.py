@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Generates the built-in default cover (128x128) and writes source/placeholder.h.
-Needs Pillow.  Run:  python3 tools/make_cover.py"""
+"""LEGACY generator (blue music-note cover). It OVERWRITES resources/cover.png and source/placeholder.h.
+Do not run it with the purple GRIMZZZZ artwork - use tools/embed_cover.py, which only embeds resources/cover.png.
+Needs Pillow."""
 import math, os, glob
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 

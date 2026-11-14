@@ -25,10 +25,10 @@ card in `SD:/3ds/PROJECT_NOISE/covers/` so they appear instantly next time (dele
 Picking a song folds the side covers away and leaves the now-playing view (art, title, artist, progress bar,
 times); scroll the list again and the covers fan back out. Songs without art show the default logo cover.
 
-A short branded splash shows the app mark and **MADE BY GRIMZZZZ** on launch. The background around the
+A minimal boot screen shows the app mark, a small equaliser animation, a thin progress bar and **MADE BY GRIMZZZZ** on launch (a quiet task checklist runs on the bottom screen). The background around the
 cover carries an **ambient glow** taken from the artwork's dominant colour: it follows the cover in the
 middle of the screen and fades smoothly between covers. Folders and covers without art glow in your accent
-colour. Turn it off, or pick *Soft* / *Vivid*, in Settings > Look > *Ambient glow*.
+colour. Turn it off, or pick *Soft* / *Vivid*, in Settings > Display > *Ambient glow*.
 
 **Bottom screen** - folder + music browser (starts in `SD:/Music/`) with a **search bar** and a
 **Favorites** heart in the header. The playing song is highlighted. Touch controls sit along the bottom:
@@ -40,7 +40,7 @@ when on; repeat-one shows a small "1".
 | Control | Action |
 |---|---|
 | **L / R** | Previous / next song (previous restarts the song if more than 3 s have played); the list highlight follows the playing song |
-| **D-pad Left / Right** | Skip back / forward (default 5 s, hold to keep skipping; past the end of a song = next track). Length is set in Settings > Player > *Skip length*. In Settings: adjust the selected value |
+| **D-pad Left / Right** | Skip back / forward (default 5 s, hold to keep skipping; past the end of a song = next track). Length is set in Settings > Playback > *Skip length*. In Settings: adjust the selected value |
 | **D-pad Up / Down** | Move through the list (hold to scroll fast) |
 | **A** | Play the selected song; open the selected folder (or `..` to go up); resume if paused. In Settings: step the selected value |
 | **B** | Pause. Closes Settings / Up Next |
@@ -85,13 +85,12 @@ folders, for the best results.
 
 ### Settings (SELECT)
 
-Four tabs:
+Seven sections. Tap the left / right half of the switcher bar under the title (or press D-pad Down / Up past the
+first / last row) to change section; the dots beside the title show where you are. A section with more rows than
+fit (Display) scrolls: the highlight scrolls it with the D-pad, and the small arrows at the right edge scroll it by touch.
 
-- **Look** - a theme preset (Noise, Neon, Emerald, Ocean, Sunset, Mono), **OLED black** (true-black background
-  with neon accents and glowing text), **Glow color** (Auto, Cyan, Mint, Amber, Magenta, Violet, Crimson, Ice -
-  tints the ambient glow, the halos around panels and the NOW PLAYING glow), **Ambient glow** (Off / Soft /
-  Vivid), **Album colors** (the accent follows the playing cover; switch it off to keep your theme colour) and
-  five wallpaper treatments. Everything uses lightweight 2D drawing, so it suits the Old 3DS.
+- **Playback** - **Remember song** (reopens on the last song and position), **Skip length** (5 / 10 / 15 / 30 s) and
+  **Track info** (elapsed, length, format and bitrate).
 - **Audio** - a **Manual EQ** switch and a **5-band equalizer** drawn as five vertical sliders (60 Hz,
   230 Hz, 910 Hz, 3.6 kHz, 14 kHz; -12..+12 dB, gain shown above each slider), plus presets (Flat, Bass Boost,
   Treble, Vocal, Rock, Pop).
@@ -101,14 +100,19 @@ Four tabs:
     remembered while you switch back and forth.
   - Drag a slider with the stylus or a finger; with the D-pad, Left/Right picks the band, Up/Down changes its
     gain, and A (or Left / Right past the first / last band) leaves the sliders.
-- **Player** - **Visualizer** (Cover / LED Spectrum / Scope / VU Deck - the three visualizers are full-width,
-  retro car-stereo style displays), **Cover fade**, **Track info** (elapsed, length, format and bitrate),
-  **Remember song** (reopens on the last song and position), **Skip length** (5 / 10 / 15 / 30 s) and
-  **Play lid closed** (keeps the music going when you shut the lid; see below).
-- **General** - **Clock** (off / 12-hour / 24-hour), **Battery** (on / off) with a **Battery style** (Icon /
-  Percent), **Battery saver**, a **Sleep timer** switch with a 5 / 10 / 15 / 30 / 45 / 60-minute duration (the
-  countdown shows on the top screen; changing the duration restarts a running timer), **Show setup guide** and
-  **Exit app** (asks for confirmation).
+- **Display** - **OLED mode** (true-black background with neon accents and glowing text), **Glow color** (Auto, Cyan, Mint,
+  Amber, Magenta, Violet, Crimson, Ice - tints the ambient glow, the halos around panels and the NOW PLAYING glow),
+  **Ambient glow** (Off / Soft / Vivid), **Album colors** (the accent follows the playing cover; switch it off to keep your
+  theme colour), **Visualizer** (Cover / LED Spectrum / Scope / VU Deck), **Cover fade**, **Keyboard font**, **Clock**
+  (off / 12-hour / 24-hour), **Battery** (on / off) and **Battery style** (Icon / Percent). The theme preset and
+  wallpaper are chosen in the setup guide (see **Replay guide** under About).
+- **Background Playback** - **Play lid closed** (keeps the music going when you shut the lid; see below) and
+  **Battery saver**.
+- **Timers** - a **Sleep timer** switch with a 5 / 10 / 15 / 30 / 45 / 60-minute **Timer length** (the countdown
+  shows on the top screen; changing the duration restarts a running timer).
+- **Library** - lyrics: **Automatic search**, **Auto download**, **Offline only**, **Prefer synced**, **Animated lyrics**,
+  **Animation style**, **Lyrics font** and **Clear lyrics cache** (see Lyrics below).
+- **About** - **Replay guide**, **Exit app** (asks for confirmation) and the PROJECT NOISE / **MADE BY GRIMZZZZ** credit.
 
 **Battery saver** draws at 30 fps, simplifies the visualizers, dims the glow, turns off the breathing / pop
 animations and screen fades, and polls the battery less often.
@@ -130,7 +134,7 @@ from an `Artist - Title` file name. Remixes, covers, live and karaoke versions a
 one, and the length must roughly match. Title / artist are cleaned before searching (`- Remastered`, `feat.`, brackets, accents,
 `A; B` credits). Synchronized (LRC) lyrics highlight the current line and scroll with the song;
 plain lyrics scroll with the D-pad. Searching runs on a background thread, so playback never waits for it.
-Settings > Lyrics: *Automatic search* (look online when the lyrics screen opens; off = press A), *Auto download*
+Settings > Library: *Automatic search* (look online when the lyrics screen opens; off = press A), *Auto download*
 (keep results in the SD cache; off = shown only), *Offline only* (cache and `.lrc` files only), *Prefer synced*,
 *Clear lyrics cache*. Songs nobody has are remembered for 7 days so they are not searched again.
 
@@ -161,7 +165,7 @@ all other covers keep loading in the background.
 A three-step setup runs once: (1) welcome plus a check that sound and the music folder are ready, (2) **Make it
 yours** - theme, ambient glow, clock and battery on one page, with the top screen showing the result live, (3)
 a controls cheat-sheet. Use the touch buttons or **A** = Next, **B** = Back; *Skip* leaves early. Replay it any
-time from Settings > General > *Show setup guide*.
+time from Settings > About > *Replay guide*.
 
 ### Limits
 
@@ -278,7 +282,7 @@ Licenses and attribution: see `LICENSE` and `THIRD_PARTY_NOTICES.md`.
 
 ### Play with the lid closed
 
-Settings > Player > **Play lid closed** (off by default, saved as `lid_play`). While it is on and a song is playing,
+Settings > Background Playback > **Play lid closed** (off by default, saved as `lid_play`). While it is on and a song is playing,
 the console is not allowed to sleep, so closing the lid keeps the music going (L / R still skip). The screens are
 switched off while the lid is shut and come back when you open it. Pausing or stopping (or the sleep timer ending)
 lets the console sleep as normal. With the switch off, closing the lid pauses and sleeps like before. Playing with

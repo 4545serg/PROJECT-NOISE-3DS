@@ -58,6 +58,91 @@
 
 # Changelog
 
+## Redesign - seven settings sections, minimal boot screen
+
+- **Settings reorganized** into Playback, Audio, Display, Background Playback, Timers, Library and About. Every existing
+  setting is kept and saved under the same `settings.cfg` keys, so saved preferences load exactly as before.
+  Row moves: Remember song / Skip length / Track info -> Playback; Look rows, Visualizer, Cover fade, Keyboard font, Clock,
+  Battery, Battery style -> Display; Play lid closed / Battery saver -> Background Playback; Sleep timer / Timer length ->
+  Timers; the lyrics rows -> Library; Replay guide / Exit app -> About.
+- **Section switcher**: a rounded bar with the full section name replaces the five tab buttons (seven names do not fit a
+  320 px strip). Tap its left / right half, or use D-pad Up / Down past the ends; page dots sit beside the title.
+- **Scrolling cards**: Display has ten rows; it scrolls with the D-pad highlight, or by the arrows at the right edge.
+- **About** page with the PROJECT NOISE name and the MADE BY GRIMZZZZ credit.
+- **Boot screen**: the retro beveled window is replaced by a minimal layout - logo, name, tagline, equaliser animation
+  (still when Battery saver is on), thin progress bar with a light sweep, current task and the MADE BY GRIMZZZZ credit; the
+  bottom screen shows a quiet task checklist. Startup tasks and timing are unchanged.
+- **Default cover** (boot logo and songs without artwork) is now the branded `resources/cover.png`, embedded by the new
+  `tools/embed_cover.py`. `tools/make_cover.py` is marked legacy because it overwrites `resources/cover.png`.
+- Settings now open on the first row (Remember song) instead of a hidden row, and D-pad Up no longer steps onto hidden
+  setup-only rows.
+- Playback, favorites, the sleep timer, lid-closed playback, lyrics and all other code are unchanged.
+
+## HOME button / sleep safety
+
+- Pressing HOME (or sleeping) now pauses the music, parks the audio thread so it makes no DSP calls while the app is away, allows sleep, and gives back the screen-control service; coming back resumes the song if it was playing.
+- The screen-control service is only opened while the lid is closed during playback.
+
+## Play with the lid closed
+
+- **Settings > Player > Play lid closed** (default off, saved as `lid_play`): while a song is playing the console is kept from sleeping, so music continues with the lid shut; L / R skip still works. Screens are turned off while closed and restored on opening.
+- Sleep is allowed again as soon as playback is paused, stopped or the sleep timer ends. The player settings card now has six rows.
+
+## Playback & lyrics fixes
+
+- **Seek slider**: dragging now follows the finger and seeks once on release from every bottom-screen state (it used to stay stuck when started from Up Next).
+- **Bold lyrics**: a stray `\n` in the draw code broke the build; Bold is now one extra offset pass (cheaper on Old 3DS).
+- **Compact lyrics**: text stays vertically centred at the smaller size on plain-text lyrics.
+- **Lyrics font**: the selection applies to every displayed lyric line.
+- **Animated lyrics** (Settings > Lyrics): the ON/OFF switch now actually toggles and is saved as `ly_animated`; OFF snaps lines and scrolls plain lyrics a whole line at a time.
+
+## Custom keyboard, keyboard font, smoother library scrolling
+
+- **Gothic on-screen keyboard** replaces the system keyboard for song search (touch, or D-pad + A / B backspace / X shift / Y or START search / SELECT cancel). Same dark rounded keys, accent rim and glow as the rest of the app; letters + digits/symbols pages, one-shot shift, hold Backspace to repeat, 40-character limit, same "not blank" rule as before.
+- **Settings > Look > Keyboard font**: Gothic (default), Bold, System, Compact. Saved as `kb_font` in `settings.cfg` (older files simply get the default).
+- **Library scrolling**: title/artist/length tags are no longer read from the SD card (plus an MP3 frame probe) on the draw path while you scroll; they load one per frame after the selection has been still for ~0.2 s, selected song first and its neighbours after. The top-screen cover flow uses wider perspective strips only while the covers are moving (about half the draw calls); the settled view is unchanged.
+- Nothing else changed.
+
+## Lyrics: reliable lookup, blackletter font
+
+- **Lookup fixes**: a missing `SD:/config/ssl/cacert.pem` made libcurl fail every request (reported as "couldn't reach the server") - certificates are now only checked when asked for (`verify_tls=1`) or when a service token is sent; replies bigger than the 192 KB buffer (LRCLIB search can return 20 full lyrics) are cut and still used instead of failing; replies are gzip-compressed; DNS is cached; the worker thread has a 128 KB stack and a smaller socket buffer (Old 3DS heap).
+- **Never stuck on "searching"**: 12 s search budget (6 s connect / 8 s per request, an Old 3DS TLS handshake alone takes 2-4 s) plus a 16 s main-thread watchdog.
+- **LYRICS NOT FOUND** replaces "Couldn't reach the lyrics servers" (a failed lookup is not remembered, so it is retried).
+- **Better matches**: titles are cleaned (`- Remastered 2011`, `- Radio Edit`, `feat.`, brackets), accents are folded (Beyonce = Beyoncé), multi-artist tags search by the lead artist, LRCLIB exact lookup uses the clean title, LRCMux now uses its LRCLIB-compatible `lrcmux.dev/api` search, and a few seconds of length difference only lowers the rank instead of rejecting the song.
+- **Lyrics font**: new blackletter typeface (lower case + capitals, digits, punctuation; heavy pointed stems, diamond feet, faceted bowls) drawn with one broad-nib model so every letter has the same weight and slant (`tools/make_lyfont.py`). Even spacing measured from the glyph ink; larger lines on the lyrics screen. Lines it cannot draw (accents, other scripts, too small) still use the system font. Same 512x256 A8 atlas as before.
+- Nothing else changed.
+
+## Lyrics: gothic font, faster lookups
+
+- Lyrics screen only: new **Gothic** lyrics typeface (default; Settings > Lyrics > Lyrics font). Heavy, condensed, pointed capitals
+  drawn from a small embedded glyph atlas (`tools/make_lyfont.py` -> `source/lyfont_data.h`, `source/lyfont.c`). Lower case is shown as
+  capitals; a line with accents / other scripts (or too long) automatically uses the normal system font. Bold / Compact / System remain.
+- Removed the "Your music keeps playing" line; "No lyrics found" is now "LYRICS NOT FOUND".
+- One shared 9 s time budget per search (4 s connect, 6 s per request), instant cancel when the song changes, one reused HTTPS
+  connection, no second http:C attempt after libcurl, no duplicate LRCLIB title search, a single LRCMux request (skipped when LRCLIB
+  already said "not found"), no sleeps between providers, and the CA-failure retry is remembered for the session.
+- Cached / `.lrc` lyrics appear immediately (no thread hop); online results are shown first and written to the SD card afterwards.
+- Player, bottom screen, artwork, controls and playback are unchanged.
+
+## Lyrics networking repair
+
+- Use devkitPro 3DS curl + mbedTLS for online lyrics before the legacy http:C path.
+- Follow redirects and modern HTTPS/TLS negotiation through libcurl.
+- Use `SD:/config/ssl/cacert.pem` when available and retry read-only lyrics requests without peer verification when the CA chain is unavailable.
+- Keep LRCLIB exact/search/q lookup, lyrics.ovh fallback, SD cache, sidecar `.lrc` loading, and background playback behavior.
+
+## 2026-11-11 — Lyrics network reliability
+
+- Added a TLS fallback for the 3DS lyrics HTTP client: verified HTTPS is attempted first, then the same read-only request is retried with certificate verification disabled when the console cannot validate the provider certificate chain.
+- Preserved background lookup, SD-card caching, LRCLIB lookup/fallbacks, and playback independence.
+
+# Changelog
+
+## Unreleased - About tab
+
+- Settings: new **About** tab (sixth tab) with the PROJECT NOISE name and the MADE BY GRIMZZZZ credit.
+- Settings tab strip now uses six 50 px tabs.
+
 ## Unreleased
 
 ### Added (lyrics + loading screen)

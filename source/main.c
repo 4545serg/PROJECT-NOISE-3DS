@@ -53,32 +53,37 @@
 #define EQ_TRK_Y0  135         /* slider track: +12 dB at the top ... */
 #define EQ_TRK_Y1  201         /* ... -12 dB at the bottom           */
 
-enum {                         /* settings rows, grouped in four pages */
-    ROW_PRESET, ROW_OLED, ROW_GLOWCOL, ROW_GLOW, ROW_DYN, ROW_KB_FONT, ROW_WALLPAPER, /* Look    */
-    ROW_EQMAN, ROW_EQPRE, ROW_B0, ROW_B1, ROW_B2, ROW_B3, ROW_B4,              /* Audio   */
-    ROW_DISPLAY, ROW_FADE, ROW_INFO, ROW_RESUME, ROW_SEEK, ROW_LID,            /* Player  */
-    ROW_LY_SEARCH, ROW_LY_DL, ROW_LY_OFFLINE, ROW_LY_SYNC, ROW_LY_ANIM, ROW_LY_STYLE, ROW_LY_FONT, ROW_LY_CLEAR, /* Lyrics */
-    ROW_CLOCK, ROW_BATT, ROW_BATTSTYLE, ROW_SAVER,                             /* General */
-    ROW_SLEEP_ENABLE, ROW_SLEEP_TIMER, ROW_GUIDE, ROW_EXIT,
+enum {                         /* settings rows, grouped in seven pages; this order is the D-pad order */
+    ROW_PRESET, ROW_WALLPAPER,                                                 /* first-run setup only        */
+    ROW_RESUME, ROW_SEEK, ROW_INFO,                                            /* Playback                    */
+    ROW_EQMAN, ROW_EQPRE, ROW_B0, ROW_B1, ROW_B2, ROW_B3, ROW_B4,              /* Audio                       */
+    ROW_OLED, ROW_GLOWCOL, ROW_GLOW, ROW_DYN, ROW_DISPLAY, ROW_FADE, ROW_KB_FONT,
+    ROW_CLOCK, ROW_BATT, ROW_BATTSTYLE,                                        /* Display                     */
+    ROW_LID, ROW_SAVER,                                                        /* Background Playback         */
+    ROW_SLEEP_ENABLE, ROW_SLEEP_TIMER,                                         /* Timers                      */
+    ROW_LY_SEARCH, ROW_LY_DL, ROW_LY_OFFLINE, ROW_LY_SYNC, ROW_LY_ANIM, ROW_LY_STYLE, ROW_LY_FONT, ROW_LY_CLEAR, /* Library */
+    ROW_GUIDE, ROW_EXIT,                                                       /* About                       */
     SET_ROWS
 };
 
-/* "Cards" are lists of settings rows drawn as one inset panel. Cards 0 and 2 are the Look and General
- * tabs (the Sound tab has its own layout); CARD_SETUP is the single combined page of the first-run setup. */
-enum { CARD_LOOK, CARD_SOUND, CARD_PLAYER, CARD_GENERAL, CARD_SETUP, CARD_LYRICS, CARD_COUNT };
-static const int   ROWS_LOOK[]    = { ROW_OLED, ROW_GLOWCOL, ROW_GLOW, ROW_DYN, ROW_KB_FONT };
-static const int   ROWS_PLAYER[]  = { ROW_DISPLAY, ROW_FADE, ROW_INFO, ROW_RESUME, ROW_SEEK, ROW_LID };
-static const int   ROWS_GENERAL[] = { ROW_CLOCK, ROW_BATT, ROW_BATTSTYLE, ROW_SAVER, ROW_SLEEP_ENABLE, ROW_SLEEP_TIMER, ROW_GUIDE, ROW_EXIT };
-static const int   ROWS_SETUP[]   = { ROW_PRESET, ROW_GLOW, ROW_CLOCK, ROW_BATT };
-static const int   ROWS_LYRICS[]  = { ROW_LY_SEARCH, ROW_LY_DL, ROW_LY_OFFLINE, ROW_LY_SYNC, ROW_LY_ANIM, ROW_LY_STYLE, ROW_LY_FONT, ROW_LY_CLEAR };
-static const int  *CARD_ROWS[CARD_COUNT] = { ROWS_LOOK, NULL, ROWS_PLAYER, ROWS_GENERAL, ROWS_SETUP, ROWS_LYRICS };
-static const int   CARD_LEN[CARD_COUNT]  = { 5, 0, 6, 8, 4, 8 };
-static const float CARD_ROWH[CARD_COUNT] = { 29.0f, 0.0f, 25.0f, 19.5f, 25.0f, 20.0f };
-#define PAGES 5
-static const int   PAGE_CARD[PAGES]      = { CARD_LOOK, CARD_SOUND, CARD_PLAYER, CARD_LYRICS, CARD_GENERAL };
-static const int   TAB_FIRST[PAGES]      = { ROW_OLED, ROW_EQMAN, ROW_DISPLAY, ROW_LY_SEARCH, ROW_CLOCK };
-static const char *PAGE_NAMES[PAGES]     = { "Look", "Audio", "Player", "Lyrics", "General" };
-#define TAB_W   60             /* settings tab strip: PAGES segments of TAB_W px starting at x = 10 */
+/* "Cards" are lists of settings rows drawn as one inset panel (the Audio page has its own layout);
+ * CARD_SETUP is the single combined page of the first-run setup. A card with more rows than fit on the
+ * screen scrolls (card_top). */
+enum { CARD_PLAYBACK, CARD_SOUND, CARD_DISPLAY, CARD_BACKGROUND, CARD_TIMERS, CARD_LIBRARY, CARD_ABOUT, CARD_SETUP, CARD_COUNT };
+static const int   ROWS_PLAYBACK[]   = { ROW_RESUME, ROW_SEEK, ROW_INFO };
+static const int   ROWS_DISPLAY[]    = { ROW_OLED, ROW_GLOWCOL, ROW_GLOW, ROW_DYN, ROW_DISPLAY, ROW_FADE, ROW_KB_FONT, ROW_CLOCK, ROW_BATT, ROW_BATTSTYLE };
+static const int   ROWS_BACKGROUND[] = { ROW_LID, ROW_SAVER };
+static const int   ROWS_TIMERS[]     = { ROW_SLEEP_ENABLE, ROW_SLEEP_TIMER };
+static const int   ROWS_LIBRARY[]    = { ROW_LY_SEARCH, ROW_LY_DL, ROW_LY_OFFLINE, ROW_LY_SYNC, ROW_LY_ANIM, ROW_LY_STYLE, ROW_LY_FONT, ROW_LY_CLEAR };
+static const int   ROWS_ABOUT[]      = { ROW_GUIDE, ROW_EXIT };
+static const int   ROWS_SETUP[]      = { ROW_PRESET, ROW_GLOW, ROW_CLOCK, ROW_BATT };
+static const int  *CARD_ROWS[CARD_COUNT] = { ROWS_PLAYBACK, NULL, ROWS_DISPLAY, ROWS_BACKGROUND, ROWS_TIMERS, ROWS_LIBRARY, ROWS_ABOUT, ROWS_SETUP };
+static const int   CARD_LEN[CARD_COUNT]  = { 3, 0, 10, 2, 2, 8, 2, 4 };
+static const float CARD_ROWH[CARD_COUNT] = { 29.0f, 0.0f, 20.0f, 29.0f, 29.0f, 20.0f, 29.0f, 25.0f };
+#define PAGES 7
+static const int   PAGE_CARD[PAGES]      = { CARD_PLAYBACK, CARD_SOUND, CARD_DISPLAY, CARD_BACKGROUND, CARD_TIMERS, CARD_LIBRARY, CARD_ABOUT };
+static const int   TAB_FIRST[PAGES]      = { ROW_RESUME, ROW_EQMAN, ROW_OLED, ROW_LID, ROW_SLEEP_ENABLE, ROW_LY_SEARCH, ROW_GUIDE };
+static const char *PAGE_NAMES[PAGES]     = { "Playback", "Audio", "Display", "Background Playback", "Timers", "Library", "About" };
 
 #define TOP_W   400            /* screen sizes in pixels */
 #define BOT_W   320
@@ -254,7 +259,7 @@ static float     label_a = 1.0f, label_glow = 0.0f, info_a = 0.0f;
 static bool      label_np = false;            /* label currently shows NOW PLAYING */
 static float     bot_fade = 0.0f;             /* bottom-screen transition: 1 = just switched, eases to 0 */
 static int       bot_key = -1;
-static float     tab_x = 10.0f;
+static int       card_top = 0;                /* first visible row of a scrolling settings card */
 static float     sw_anim[SET_ROWS];
 static bool      sw_init[SET_ROWS];
 static unsigned  frame_no = 0;
@@ -858,7 +863,17 @@ static void ensure_meta(Entry *e)
 
 /* --------------------------------------------------------------- settings */
 static bool is_slider_row(int r) { return r >= ROW_B0 && r <= ROW_B4; }
-static int  row_page(int r)      { return r < ROW_EQMAN ? 0 : (r < ROW_DISPLAY ? 1 : (r < ROW_LY_SEARCH ? 2 : (r < ROW_CLOCK ? 3 : 4))); }
+static int  row_page(int r)
+{
+    if (r < ROW_RESUME)      return 2;      /* setup-only rows (theme / wallpaper) have no page of their own */
+    if (r < ROW_EQMAN)       return 0;      /* Playback            */
+    if (r < ROW_OLED)        return 1;      /* Audio               */
+    if (r < ROW_LID)         return 2;      /* Display             */
+    if (r < ROW_SLEEP_ENABLE) return 3;     /* Background Playback */
+    if (r < ROW_LY_SEARCH)   return 4;      /* Timers              */
+    if (r < ROW_GUIDE)       return 5;      /* Library             */
+    return 6;                               /* About               */
+}
 
 static bool is_switch_row(int r)
 {
@@ -874,6 +889,25 @@ static int card_pos(int card, int row)            /* index of `row` inside a car
     for (int i = 0; i < CARD_LEN[card]; i++)
         if (CARD_ROWS[card][i] == row) return i;
     return -1;
+}
+
+#define CARD_BOTTOM 234.0f                              /* the card panel ends above the bottom edge */
+static int card_vis(int card)                           /* rows of a card that fit on screen */
+{
+    int v = (int)((CARD_BOTTOM - 70.0f) / CARD_ROWH[card]);
+    return v < 1 ? 1 : v;
+}
+static void card_scroll_fix(int card)                   /* keep card_top valid and the selected row visible */
+{
+    const int n = CARD_LEN[card], vis = card_vis(card);
+    const int max_top = n > vis ? n - vis : 0;
+    const int pos = card_pos(card, set_row);
+    if (card_top > max_top) card_top = max_top;
+    if (card_top < 0) card_top = 0;
+    if (pos >= 0) {
+        if (pos < card_top) card_top = pos;
+        else if (pos >= card_top + vis) card_top = pos - vis + 1;
+    }
 }
 
 static void eq_push(void) { audio_set_eq(S.eq); }
@@ -1158,8 +1192,8 @@ static void slider_apply(int r, int px, int py)
 static int row_step(int r, int dir)
 {
     int n = r + dir;
-    if (n < 0 || n >= SET_ROWS) return r;
-    if (is_band_row(n) && !S.eq_manual) n = (dir > 0) ? ROW_DISPLAY : ROW_EQPRE;
+    if (n < ROW_RESUME || n >= SET_ROWS) return r;
+    if (is_band_row(n) && !S.eq_manual) n = (dir > 0) ? ROW_OLED : ROW_EQPRE;
     return n;
 }
 
@@ -2955,15 +2989,28 @@ static void draw_card(int card)
     u32 cDanger = C2D_Color32(255, 90, 95, 255);
     const float rh = CARD_ROWH[card];
     const int n = CARD_LEN[card];
+    const int vis = card_vis(card);
     char val[48];
 
-    rrect(6, 66, 308, n * rh + 8, 10, 0.26f, cCard);
-    for (int i = 0; i < n; i++) {
+    card_scroll_fix(card);
+    const int shown = n < vis ? n : vis;
+    rrect(6, 66, 308, shown * rh + 8, 10, 0.26f, cCard);
+    if (n > vis) {                                              /* scroll track + thumb + up / down touch zones */
+        const float th = shown * rh, tt = 70.0f;
+        C2D_DrawRectSolid(308, tt + 10, 0.27f, 3, th - 20, cSel);
+        const float len = (th - 20) * (float)vis / (float)n;
+        const float off = (th - 20 - len) * (float)card_top / (float)(n - vis);
+        C2D_DrawRectSolid(308, tt + 10 + off, 0.29f, 3, len, cAcc);
+        C2D_DrawTriangle(309.5f, tt + 2, cDim, 305.5f, tt + 8, cDim, 313.5f, tt + 8, cDim, 0.34f);
+        C2D_DrawTriangle(309.5f, tt + th - 2, cDim, 305.5f, tt + th - 8, cDim, 313.5f, tt + th - 8, cDim, 0.34f);
+    }
+    for (int k = 0; k < shown; k++) {
+        const int i = card_top + k;
         int r = CARD_ROWS[card][i];
-        float y = 70.0f + i * rh;
+        float y = 70.0f + k * rh;
         bool sel = (r == set_row);
-        if (sel) rrect(9, y, 302, rh, 8, 0.28f, cSel);
-        else if (i > 0) C2D_DrawRectSolid(18, y, 0.28f, 284, 1, cSel);
+        if (sel) rrect(9, y, n > vis ? 296 : 302, rh, 8, 0.28f, cSel);
+        else if (k > 0) C2D_DrawRectSolid(18, y, 0.28f, n > vis ? 278 : 284, 1, cSel);
 
         row_text(row_label(r), 18, y, rh, 0.45f, (r == ROW_EXIT || r == ROW_LY_CLEAR) ? cDanger : cText, C2D_AlignLeft, is_switch_row(r) ? 190 : 128);
 
@@ -3055,21 +3102,24 @@ static void draw_settings(void)
     int page = row_page(set_row);
 
     draw_text("Settings", 14, 2, 0.85f, cText, C2D_AlignLeft, 220);
-    draw_text(PAGE_NAMES[page], 14, 26, 0.34f, cDim, C2D_AlignLeft, 160);
+    for (int t = 0; t < PAGES; t++)                              /* page dots */
+        C2D_DrawCircleSolid(128.0f + (float)t * 12.0f, 18, 0.30f, t == page ? 3.2f : 2.0f, t == page ? cAcc : cDim);
     rrect(250, 6, 62, 22, 11, 0.30f, cAcc);                      /* Done pill (touch: y < 40, x >= 244) */
     row_text("Done", 281, 6, 22, 0.45f, cBg, C2D_AlignCenter, 0);
 
-    rrect(10, 42, 300, 24, 12, 0.26f, cCard);                    /* segmented control: five 60 px tabs */
-    const float tab_target = 10.0f + (float)page * TAB_W;
-    if (S.saver || fabsf(tab_target - tab_x) > 200.0f) tab_x = tab_target;
-    tab_x += (tab_target - tab_x) * 0.35f;                       /* the highlight slides to the chosen tab */
-    if (fabsf(tab_target - tab_x) < 0.4f) tab_x = tab_target;
-    rrect(tab_x + 2, 44, TAB_W - 4, 20, 10, 0.30f, cAcc);
-    for (int t = 0; t < PAGES; t++)
-        row_text(PAGE_NAMES[t], 10.0f + t * TAB_W + TAB_W / 2.0f, 44, 20, 0.40f, t == page ? cBg : cDim, C2D_AlignCenter, TAB_W - 6);
+    rrect(10, 42, 300, 24, 12, 0.26f, cCard);                    /* page switcher: tap left half = previous, right half = next */
+    draw_arrow(26, 54, -1, cAcc);
+    draw_arrow(294, 54, +1, cAcc);
+    row_text(PAGE_NAMES[page], 160, 42, 24, 0.5f, cText, C2D_AlignCenter, 230);
 
     if (page == 1) draw_sound();
     else draw_card(PAGE_CARD[page]);
+
+    if (page == PAGES - 1) {                                     /* About: quiet brand footer */
+        C2D_DrawRectSolid(120, 150, 0.28f, 80, 1, C(mix_rgb(th_bg, th_acc, 90)));
+        draw_text("PROJECT NOISE", 160, 160, 0.62f, cAcc, C2D_AlignCenter, 280);
+        draw_text("MADE BY GRIMZZZZ", 160, 184, 0.36f, cDim, C2D_AlignCenter, 280);
+    }
 }
 
 /* ------------------------------------------------------------------ Up Next */
@@ -3672,8 +3722,22 @@ static void handle_header_tap(int px, int py)    /* tabs (All Songs / Liked Song
 /* touch on a settings card (Settings tabs and setup steps share this) */
 static void card_touch(touchPosition tp, int card)
 {
-    int i = (int)(((float)tp.py - 70.0f) / CARD_ROWH[card]);
-    if (tp.py < 70 || i < 0 || i >= CARD_LEN[card]) return;
+    const int vis = card_vis(card);
+    card_scroll_fix(card);
+    if (CARD_LEN[card] > vis && tp.px >= 302 && tp.py >= 70) {          /* scroll zone at the right edge */
+        const int shown = vis;
+        const int max_top = CARD_LEN[card] - vis;
+        card_top += ((float)tp.py < 70.0f + 0.5f * shown * CARD_ROWH[card]) ? -1 : +1;
+        if (card_top < 0) card_top = 0;
+        if (card_top > max_top) card_top = max_top;
+        const int pos = card_pos(card, set_row);                         /* keep the selection on screen */
+        if (pos < card_top) set_row = CARD_ROWS[card][card_top];
+        else if (pos >= card_top + vis) set_row = CARD_ROWS[card][card_top + vis - 1];
+        return;
+    }
+    int k = (int)(((float)tp.py - 70.0f) / CARD_ROWH[card]);
+    int i = card_top + k;
+    if (tp.py < 70 || k < 0 || k >= vis || i < 0 || i >= CARD_LEN[card]) return;
     int r = CARD_ROWS[card][i];
     set_row = r;
 
@@ -3715,10 +3779,9 @@ static void handle_settings_touch(touchPosition tp)
         if (tp.px >= 244) close_settings();
         return;
     }
-    if (tp.py < 70) {                                   /* segmented control */
-        int t = ((int)tp.px - 10) / TAB_W;
-        if (t < 0) t = 0;
-        if (t > PAGES - 1) t = PAGES - 1;
+    if (tp.py < 70) {                                   /* page switcher: left half = previous, right half = next */
+        const int cur = row_page(set_row);
+        const int t = (tp.px < 160) ? (cur + PAGES - 1) % PAGES : (cur + 1) % PAGES;
         set_row = TAB_FIRST[t];
         return;
     }
@@ -3843,8 +3906,9 @@ static int bot_state_key(void)
 }
 
 /* ====================================================================== loading screen
- * A classic application window (bevelled frame, gradient title bar, sunken progress bar of blocks) in the
- * theme colours. Progress is real: every task below runs between two frames and moves the bar by its weight.
+ * Minimal boot screen: logo, name, a small equaliser animation and a thin progress bar on the top screen,
+ * a quiet task checklist on the bottom one, and the MADE BY GRIMZZZZ credit. Progress is real: every task
+ * below runs between two frames and moves the bar by its weight.
  * Nothing here searches online; only cached lyrics of the song that is selected / was playing last are read. */
 typedef struct { const char *name; int weight; } LoadTask;
 static const LoadTask LOAD_TASKS[] = {
@@ -3865,122 +3929,66 @@ static C3D_Tex           ld_logo_tex;
 static bool              ld_logo_ok = false;
 static Tex3DS_SubTexture ld_logo_sub = { 128, 128, 0.0f, 1.0f, 1.0f, 0.0f };
 
-static void ld_bevel(float x, float y, float w, float h, bool sunken, float z)
-{
-    const Rgb face = mix_rgb(th_bg, th_tx, 20), black = { 0, 0, 0 };
-    const u32 hi = C(mix_rgb(face, th_tx, 120)), lo = C(mix_rgb(th_bg, black, 170));
-    const u32 a = sunken ? lo : hi, b = sunken ? hi : lo;
-    C2D_DrawRectSolid(x, y, z, w, 1, a);
-    C2D_DrawRectSolid(x, y, z, 1, h, a);
-    C2D_DrawRectSolid(x, y + h - 1, z, w, 1, b);
-    C2D_DrawRectSolid(x + w - 1, y, z, 1, h, b);
-}
-
-static void ld_window(float x, float y, float w, float h, const char *title, float t)
-{
-    const Rgb face = mix_rgb(th_bg, th_tx, 20);
-    C2D_DrawRectSolid(x + 4, y + 4, 0.20f, w, h, C2D_Color32(0, 0, 0, 110));          /* drop shadow */
-    C2D_DrawRectSolid(x, y, 0.22f, w, h, C(face));
-    ld_bevel(x, y, w, h, false, 0.23f);
-    ld_bevel(x + 1, y + 1, w - 2, h - 2, false, 0.23f);
-
-    /* title bar: dark -> bright accent gradient with a slow highlight sweeping across it */
-    const float bx = x + 3, by = y + 3, bw = w - 6, bh = 18;
-    const u32 c0 = C(mix_rgb(th_bg, th_acc, 130)), c1 = C(th_acc);
-    C2D_DrawRectangle(bx, by, 0.24f, bw, bh, c0, c1, c0, c1);
-    if (!S.saver) {
-        float sx = bx + fmodf(t * 70.0f, bw + 80.0f) - 40.0f, x0 = sx < bx ? bx : sx, x1 = sx + 26.0f > bx + bw ? bx + bw : sx + 26.0f;
-        if (x1 > x0) C2D_DrawRectSolid(x0, by, 0.25f, x1 - x0, bh, C2D_Color32(255, 255, 255, 34));
-    }
-    icon_note(bx + 5, by + 1, C2D_Color32(255, 255, 255, 255));
-    row_text(title, bx + 24, by, bh, 0.48f, C2D_Color32(255, 255, 255, 255), C2D_AlignLeft, bw - 90);
-
-    /* window buttons (decorative): minimise, maximise, close */
-    for (int k = 0; k < 3; k++) {
-        const float gx = bx + bw - 17.0f * (float)(3 - k) - 1.0f, gy = by + 2, gw = 15, gh = 14;
-        C2D_DrawRectSolid(gx, gy, 0.26f, gw, gh, C(face));
-        ld_bevel(gx, gy, gw, gh, false, 0.27f);
-        const u32 g = C(th_tx);
-        if (k == 0) C2D_DrawRectSolid(gx + 4, gy + 9, 0.28f, 7, 2, g);
-        else if (k == 1) {
-            C2D_DrawRectSolid(gx + 4, gy + 3, 0.28f, 8, 2, g);
-            C2D_DrawRectSolid(gx + 4, gy + 3, 0.28f, 1, 8, g);
-            C2D_DrawRectSolid(gx + 11, gy + 3, 0.28f, 1, 8, g);
-            C2D_DrawRectSolid(gx + 4, gy + 10, 0.28f, 8, 1, g);
-        }
-        else { C2D_DrawLine(gx + 4, gy + 3, g, gx + 11, gy + 10, g, 1.6f, 0.28f); C2D_DrawLine(gx + 11, gy + 3, g, gx + 4, gy + 10, g, 1.6f, 0.28f); }
-    }
-}
-
 static void ld_top(float t)
 {
-    const float x = 40, y = 32, w = 320, h = 176;
-    const u32 cText = C(th_tx), cAcc = C(th_acc), cDim = C(mix_rgb(th_tx, th_bg, 120));
-    ld_window(x, y, w, h, "PROJECT NOISE", t);
-
-    /* logo in a sunken frame, name, tagline */
-    C2D_DrawRectSolid(x + 14, y + 30, 0.28f, 76, 76, C(mix_rgb(th_bg, th_acc, 14)));
-    ld_bevel(x + 14, y + 30, 76, 76, true, 0.29f);
-    if (ld_logo_ok) { C2D_Image img = { &ld_logo_tex, &ld_logo_sub }; C2D_DrawImageAt(img, x + 20, y + 36, 0.30f, NULL, 0.5f, 0.5f); }
-    else icon_note(x + 45, y + 60, cAcc);
-    draw_text("PROJECT NOISE", x + 104, y + 38, 0.80f, cAcc, C2D_AlignLeft, 200);
-    draw_text("Native music player", x + 104, y + 66, 0.46f, cText, C2D_AlignLeft, 200);
-    draw_text("YOUR MUSIC. YOUR NOISE.", x + 104, y + 84, 0.38f, cDim, C2D_AlignLeft, 200);
-
-    /* etched divider */
-    C2D_DrawRectSolid(x + 10, y + 112, 0.28f, w - 20, 1, C(mix_rgb(th_bg, th_tx, 8)));
-    C2D_DrawRectSolid(x + 10, y + 113, 0.28f, w - 20, 1, C(mix_rgb(th_bg, th_tx, 70)));
-
-    /* current task */
+    const u32 cAcc = C(th_acc), cDim = C(mix_rgb(th_tx, th_bg, 120));
     char buf[96];
-    const int dots = ((int)(t * 3.0f)) % 4;
-    snprintf(buf, sizeof buf, "%s%.*s", ld.task < LOAD_N ? LOAD_TASKS[ld.task].name : "Ready", ld.task < LOAD_N ? dots : 0, "...");
-    draw_text(buf, x + 14, y + 118, 0.46f, cText, C2D_AlignLeft, w - 90);
-    snprintf(buf, sizeof buf, "%d%%", (int)(ld.shown * 100.0f + 0.5f));
-    draw_text(buf, x + w - 14, y + 118, 0.46f, cAcc, C2D_AlignRight, 60);
 
-    /* progress bar: sunken well filled with blocks, the leading block pulses */
-    const float px = x + 14, py = y + 134, pw = w - 28, ph = 16;
-    C2D_DrawRectSolid(px, py, 0.28f, pw, ph, C(mix_rgb(th_bg, th_tx, 4)));
-    ld_bevel(px, py, pw, ph, true, 0.29f);
-    const float bw = 9, step = 11;
-    const int count = (int)((pw - 6) / step);
-    const float filled = ld.shown * (float)count;
-    for (int i = 0; i < count && (float)i < filled; i++) {
-        float k = 1.0f;
-        if ((float)(i + 1) > filled) k = 0.45f + 0.55f * (filled - (float)i);                 /* partly filled block */
-        else if (i + 1 >= (int)filled && !ld.done && !S.saver) k = 0.7f + 0.3f * sinf(t * 9.0f);
-        const float bx = px + 3 + (float)i * step;
-        C2D_DrawRectSolid(bx, py + 3, 0.30f, bw, ph - 6, Ca(th_acc, k));
-        C2D_DrawRectSolid(bx, py + 3, 0.31f, bw, 3, Ca(mix_rgb(th_acc, th_tx, 90), k * 0.9f));
+    /* logo (the 128 px mark drawn at half size), name, tagline */
+    if (ld_logo_ok) { C2D_Image img = { &ld_logo_tex, &ld_logo_sub }; C2D_DrawImageAt(img, 168, 30, 0.30f, NULL, 0.5f, 0.5f); }
+    else icon_note(193, 54, cAcc);
+    draw_text("PROJECT NOISE", 200, 106, 0.80f, cAcc, C2D_AlignCenter, 300);
+    draw_text("YOUR MUSIC. YOUR NOISE.", 200, 134, 0.36f, cDim, C2D_AlignCenter, 300);
+
+    /* loading animation: five small equaliser bars that settle when loading is done */
+    for (int i = 0; i < 5; i++) {
+        float k = S.saver ? 0.5f : 0.5f + 0.5f * sinf(t * 5.0f + (float)i * 1.3f);
+        if (ld.done) k = 0.1f;
+        const float bh = 3.0f + 11.0f * k;
+        C2D_DrawRectSolid(184.0f + (float)i * 7.0f, 168.0f - bh, 0.30f, 3, bh, Ca(th_acc, 0.55f + 0.45f * k));
     }
 
-    /* status bar */
-    C2D_DrawRectSolid(x + 6, y + h - 22, 0.28f, w - 12, 16, C(mix_rgb(th_bg, th_tx, 4)));
-    ld_bevel(x + 6, y + h - 22, w - 12, 16, true, 0.29f);
-    row_text("MADE BY GRIMZZZZ", x + 12, y + h - 22, 16, 0.34f, cDim, C2D_AlignLeft, 160);
-    snprintf(buf, sizeof buf, "Task %d of %d", ld.task < LOAD_N ? ld.task + 1 : LOAD_N, LOAD_N);
-    row_text(buf, x + w - 12, y + h - 22, 16, 0.34f, cDim, C2D_AlignRight, 120);
+    /* thin progress bar with a light sweep over the filled part */
+    const float px = 120, py = 178, pw = 160, ph = 3;
+    rrect(px, py, pw, ph, 1.5f, 0.28f, C(mix_rgb(th_bg, th_tx, 22)));
+    float fw = pw * ld.shown;
+    if (fw > pw) fw = pw;
+    if (fw >= 3.0f) rrect(px, py, fw, ph, 1.5f, 0.30f, cAcc);
+    if (!S.saver && !ld.done && fw > 8.0f) {
+        const float sx = px + fmodf(t * 90.0f, fw + 30.0f) - 30.0f;
+        const float x0 = sx < px ? px : sx, x1 = (sx + 30.0f > px + fw) ? px + fw : sx + 30.0f;
+        if (x1 > x0) C2D_DrawRectSolid(x0, py, 0.31f, x1 - x0, ph, C2D_Color32(255, 255, 255, 70));
+    }
+
+    /* current task + percentage */
+    const int dots = ((int)(t * 3.0f)) % 4;
+    snprintf(buf, sizeof buf, "%s%.*s", ld.task < LOAD_N ? LOAD_TASKS[ld.task].name : "Ready", ld.task < LOAD_N ? dots : 0, "...");
+    draw_text(buf, px, 188, 0.34f, cDim, C2D_AlignLeft, 120);
+    snprintf(buf, sizeof buf, "%d%%", (int)(ld.shown * 100.0f + 0.5f));
+    draw_text(buf, px + pw, 188, 0.34f, cAcc, C2D_AlignRight, 36);
+
+    draw_text("MADE BY GRIMZZZZ", 200, 220, 0.30f, cDim, C2D_AlignCenter, 200);
 }
 
 static void ld_bottom(float t)
 {
-    const float x = 30, y = 32, w = 260, h = 176;
-    const u32 cText = C(th_tx), cAcc = C(th_acc), cDim = C(mix_rgb(th_tx, th_bg, 100));
-    ld_window(x, y, w, h, "Starting up", t);
+    const u32 cText = C(th_tx), cAcc = C(th_acc), cDim = C(mix_rgb(th_tx, th_bg, 110));
+    const float x0 = 70.0f;
+    draw_text("STARTING UP", 160, 24, 0.40f, cDim, C2D_AlignCenter, 240);
     for (int i = 0; i < LOAD_N; i++) {
-        const float ry = y + 30 + (float)i * 15.0f;
+        const float ry = 50.0f + (float)i * 17.0f, cy = ry + 8.0f;
         const bool done = i < ld.task || ld.done, now = i == ld.task && !ld.done;
-        C2D_DrawRectSolid(x + 14, ry + 2, 0.28f, 10, 10, C(mix_rgb(th_bg, th_tx, 4)));
-        ld_bevel(x + 14, ry + 2, 10, 10, true, 0.29f);
         if (done) {
-            C2D_DrawLine(x + 16, ry + 7, cAcc, x + 18.5f, ry + 10, cAcc, 1.8f, 0.32f);
-            C2D_DrawLine(x + 18.5f, ry + 10, cAcc, x + 22.5f, ry + 4, cAcc, 1.8f, 0.32f);
+            C2D_DrawLine(x0 - 4, cy, cAcc, x0 - 1.5f, cy + 3, cAcc, 1.8f, 0.32f);
+            C2D_DrawLine(x0 - 1.5f, cy + 3, cAcc, x0 + 4, cy - 4, cAcc, 1.8f, 0.32f);
         } else if (now) {
-            C2D_DrawRectSolid(x + 17, ry + 5, 0.32f, 4, 4, Ca(th_acc, 0.5f + 0.5f * sinf(t * 9.0f)));
+            C2D_DrawCircleSolid(x0, cy, 0.32f, S.saver ? 3.0f : 2.5f + 1.0f * (0.5f + 0.5f * sinf(t * 9.0f)), cAcc);
+        } else {
+            C2D_DrawCircleSolid(x0, cy, 0.30f, 1.5f, Ca(th_tx, 0.30f));
         }
-        row_text(LOAD_TASKS[i].name, x + 32, ry, 14, 0.38f, now ? cAcc : (done ? cText : cDim), C2D_AlignLeft, w - 46);
+        row_text(LOAD_TASKS[i].name, x0 + 16, ry, 16, 0.38f, now ? cAcc : (done ? cText : cDim), C2D_AlignLeft, 190);
     }
+    draw_text("MADE BY GRIMZZZZ", 160, 214, 0.30f, cDim, C2D_AlignCenter, 240);
 }
 
 static void ld_render(C3D_RenderTarget *top, C3D_RenderTarget *bot)
@@ -4241,7 +4249,7 @@ int main(void)
             if (band) {
                 /* vertical sliders: Left/Right pick the band, Up/Down move it; the panel's ends lead out of it */
                 if (repeat_fire(kh, KEY_DLEFT, &hold_left))   set_row = (set_row > ROW_B0) ? set_row - 1 : ROW_EQPRE;
-                if (repeat_fire(kh, KEY_DRIGHT, &hold_right)) set_row = (set_row < ROW_B4) ? set_row + 1 : ROW_DISPLAY;
+                if (repeat_fire(kh, KEY_DRIGHT, &hold_right)) set_row = (set_row < ROW_B4) ? set_row + 1 : ROW_OLED;
                 bool gu = repeat_fire(kh, KEY_DUP, &hold_up), gd = repeat_fire(kh, KEY_DDOWN, &hold_down);
                 if (is_band_row(set_row)) {
                     if (gu) set_adjust(+1);
@@ -4266,7 +4274,7 @@ int main(void)
             if ((kh & KEY_TOUCH) && set_drag >= 0) slider_apply(set_drag, tp.px, tp.py);
             if (ku & KEY_TOUCH) set_drag = -1;
         } else {
-            if (kd & KEY_SELECT) { settings_open = true; set_row = 0; }
+            if (kd & KEY_SELECT) { settings_open = true; set_row = TAB_FIRST[0]; }
 
             /* A: open folder / play selected / resume.  B: pause. */
             if (kd & KEY_A) {
