@@ -611,7 +611,17 @@ bool audio_is_paused(void) { return g_active && g_want_pause; }
 u32 audio_position_ms(void)
 {
     u32 rate = g_rate ? g_rate : 44100;
-    return (u32)((u64)g_played * 1000u / rate);
+    /* g_played is the start frame of the buffer currently queued to NDSP.
+     * Include the DSP's live offset inside that buffer; otherwise the playback
+     * clock (and timestamped lyrics/seek UI) trails the audible audio by up to
+     * one whole buffer. Keep the same validity guard used by audio_get_vis()
+     * so a stale/out-of-range DSP position is never added. */
+    u32 frame = g_played;
+    if (g_active) {
+        const u32 sp = ndspChnGetSamplePos(0);
+        if (sp < 8192) frame += sp;
+    }
+    return (u32)((u64)frame * 1000u / rate);
 }
 
 void audio_set_volume(int percent)
